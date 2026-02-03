@@ -470,27 +470,32 @@ namespace QuantConnect.Brokerages.IG
                 };
 
                 // Set order type specific parameters
+                decimal? entryPrice = null;
                 if (order.Type == OrderType.Market || order.Type == OrderType.MarketOnOpen)
                 {
                     request.OrderType = "MARKET";
+                    // For market orders, entry price will be current market price (we'll get it below)
                 }
                 else if (order.Type == OrderType.Limit)
                 {
                     var limitOrder = (LimitOrder)order;
                     request.OrderType = "LIMIT";
                     request.Level = limitOrder.LimitPrice;
+                    entryPrice = limitOrder.LimitPrice;
                 }
                 else if (order.Type == OrderType.StopMarket)
                 {
                     var stopOrder = (StopMarketOrder)order;
                     request.OrderType = "STOP";
                     request.Level = stopOrder.StopPrice;
+                    entryPrice = stopOrder.StopPrice;
                 }
                 else if (order.Type == OrderType.StopLimit)
                 {
                     var stopLimitOrder = (StopLimitOrder)order;
                     request.OrderType = "LIMIT";
                     request.Level = stopLimitOrder.LimitPrice;
+                    entryPrice = stopLimitOrder.LimitPrice;
                 }
                 else
                 {
@@ -500,6 +505,50 @@ namespace QuantConnect.Brokerages.IG
                         Message = $"Unsupported order type: {order.Type}"
                     });
                     return false;
+                }
+
+                // Parse stop loss and take profit from order tag
+                // Expected format: "SL:1.1000;TP:1.2000" or "SL:100;TP:200" (points distance)
+                decimal? stopLossPrice = null;
+                decimal? takeProfitPrice = null;
+
+                if (!string.IsNullOrEmpty(order.Tag))
+                {
+                    ParseStopLossAndTakeProfit(order.Tag, out stopLossPrice, out takeProfitPrice);
+                }
+
+                // For market orders, we need the current price to calculate distances
+                if (entryPrice == null && (stopLossPrice.HasValue || takeProfitPrice.HasValue))
+                {
+                    // Get current market price from the security
+                    var security = _algorithm?.Securities[order.Symbol];
+                    if (security != null)
+                    {
+                        entryPrice = order.Direction == OrderDirection.Buy ? security.AskPrice : security.BidPrice;
+                    }
+                }
+
+                // Calculate and set stop loss distance
+                if (stopLossPrice.HasValue && entryPrice.HasValue)
+                {
+                    var stopDistance = CalculatePriceDistance(entryPrice.Value, stopLossPrice.Value, order.Direction);
+                    if (stopDistance > 0)
+                    {
+                        request.StopDistance = stopDistance;
+                        Log.Trace($"IGBrokerage.PlaceOrder(): Setting stop loss at distance {stopDistance} points");
+                    }
+                }
+
+                // Calculate and set take profit distance
+                if (takeProfitPrice.HasValue && entryPrice.HasValue)
+                {
+                    var limitDistance = CalculatePriceDistance(entryPrice.Value, takeProfitPrice.Value,
+                        order.Direction == OrderDirection.Buy ? OrderDirection.Sell : OrderDirection.Buy);
+                    if (limitDistance > 0)
+                    {
+                        request.LimitDistance = limitDistance;
+                        Log.Trace($"IGBrokerage.PlaceOrder(): Setting take profit at distance {limitDistance} points");
+                    }
                 }
 
                 _tradingRateGate.WaitToProceed();
@@ -1024,6 +1073,79 @@ namespace QuantConnect.Brokerages.IG
                     Log.Warning($"IGBrokerage.MapIGStatusToOrderStatus(): Unknown status '{igStatus}'");
                     return OrderStatus.None;
             }
+        }
+
+        /// <summary>
+        /// Parses stop loss and take profit prices from order tag
+        /// </summary>
+        /// <param name="tag">Order tag with format "SL:1.1000;TP:1.2000"</param>
+        /// <param name="stopLossPrice">Parsed stop loss price</param>
+        /// <param name="takeProfitPrice">Parsed take profit price</param>
+        private void ParseStopLossAndTakeProfit(string tag, out decimal? stopLossPrice, out decimal? takeProfitPrice)
+        {
+            stopLossPrice = null;
+            takeProfitPrice = null;
+
+            if (string.IsNullOrWhiteSpace(tag))
+            {
+                return;
+            }
+
+            var parts = tag.Split(';');
+            foreach (var part in parts)
+            {
+                var keyValue = part.Split(':');
+                if (keyValue.Length != 2)
+                {
+                    continue;
+                }
+
+                var key = keyValue[0].Trim().ToUpperInvariant();
+                var value = keyValue[1].Trim();
+
+                if (key == "SL" && decimal.TryParse(value, out var sl))
+                {
+                    stopLossPrice = sl;
+                    Log.Trace($"IGBrokerage.ParseStopLossAndTakeProfit(): Parsed stop loss: {sl}");
+                }
+                else if (key == "TP" && decimal.TryParse(value, out var tp))
+                {
+                    takeProfitPrice = tp;
+                    Log.Trace($"IGBrokerage.ParseStopLossAndTakeProfit(): Parsed take profit: {tp}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Calculates the price distance in points between entry and target price
+        /// </summary>
+        /// <param name="entryPrice">Entry price for the order</param>
+        /// <param name="targetPrice">Target price (stop loss or take profit)</param>
+        /// <param name="direction">Order direction</param>
+        /// <returns>Distance in points (always positive)</returns>
+        private decimal CalculatePriceDistance(decimal entryPrice, decimal targetPrice, OrderDirection direction)
+        {
+            // For buy orders:
+            // - Stop loss is below entry price: distance = entry - stop
+            // - Take profit is above entry price: distance = takeProfit - entry
+            // For sell orders:
+            // - Stop loss is above entry price: distance = stop - entry
+            // - Take profit is below entry price: distance = entry - takeProfit
+
+            decimal distance;
+
+            if (direction == OrderDirection.Buy)
+            {
+                // For buy orders, stop is below, take profit is above
+                distance = Math.Abs(entryPrice - targetPrice);
+            }
+            else
+            {
+                // For sell orders, stop is above, take profit is below
+                distance = Math.Abs(targetPrice - entryPrice);
+            }
+
+            return distance;
         }
 
         #endregion
