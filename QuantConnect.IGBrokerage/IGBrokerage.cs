@@ -74,6 +74,9 @@ namespace QuantConnect.Brokerages.IG
         // Symbol mapper
         private readonly IGSymbolMapper _symbolMapper;
 
+        // Concurrent message handler for thread-safe order operations
+        private readonly BrokerageConcurrentMessageHandler<IGTradeUpdateEventArgs> _messageHandler;
+
         // Supported security types for validation
         private static readonly HashSet<SecurityType> _supportedSecurityTypes = new HashSet<SecurityType>
         {
@@ -147,6 +150,9 @@ namespace QuantConnect.Brokerages.IG
             _subscriptionManager = new EventBasedDataQueueHandlerSubscriptionManager();
             _subscriptionManager.SubscribeImpl += (s, t) => Subscribe(s);
             _subscriptionManager.UnsubscribeImpl += (s, t) => Unsubscribe(s);
+
+            // Initialize concurrent message handler for thread-safe order operations
+            _messageHandler = new BrokerageConcurrentMessageHandler<IGTradeUpdateEventArgs>(ProcessTradeUpdate);
         }
 
         /// <summary>
@@ -517,7 +523,33 @@ namespace QuantConnect.Brokerages.IG
 
             try
             {
-                var epic = _symbolMapper.GetBrokerageSymbol(order.Symbol);
+                var result = false;
+                _messageHandler.WithLockedStream(() =>
+                {
+                    result = PlaceOrderInternal(order);
+                });
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.PlaceOrder(): Error placing order {order.Id}: {ex.Message}");
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                {
+                    Status = OrderStatus.Invalid,
+                    Message = ex.Message
+                });
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Internal implementation of order placement (called within locked stream)
+        /// </summary>
+        /// <param name="order">The order to be placed</param>
+        /// <returns>True if the request for a new order has been placed, false otherwise</returns>
+        private bool PlaceOrderInternal(Order order)
+        {
+            var epic = _symbolMapper.GetBrokerageSymbol(order.Symbol);
                 if (string.IsNullOrEmpty(epic))
                 {
                     OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
@@ -635,7 +667,7 @@ namespace QuantConnect.Brokerages.IG
                         Status = OrderStatus.Submitted
                     });
 
-                    Log.Trace($"IGBrokerage.PlaceOrder(): Order {order.Id} submitted. DealRef: {response.DealReference}");
+                    Log.Trace($"IGBrokerage.PlaceOrderInternal(): Order {order.Id} submitted. DealRef: {response.DealReference}");
                     return true;
                 }
                 else
@@ -647,17 +679,6 @@ namespace QuantConnect.Brokerages.IG
                     });
                     return false;
                 }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"IGBrokerage.PlaceOrder(): Error placing order {order.Id}: {ex.Message}");
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = OrderStatus.Invalid,
-                    Message = ex.Message
-                });
-                return false;
-            }
         }
 
         /// <summary>
@@ -671,61 +692,76 @@ namespace QuantConnect.Brokerages.IG
 
             try
             {
-                if (!_brokerIdByOrderId.TryGetValue(order.Id, out var dealId))
+                var result = false;
+                _messageHandler.WithLockedStream(() =>
                 {
-                    Log.Error($"IGBrokerage.UpdateOrder(): No broker ID found for order {order.Id}");
-                    return false;
-                }
-
-                var request = new IGUpdateOrderRequest
-                {
-                    DealId = dealId
-                };
-
-                // Update level based on order type
-                if (order.Type == OrderType.Limit)
-                {
-                    var limitOrder = (LimitOrder)order;
-                    request.Level = limitOrder.LimitPrice;
-                }
-                else if (order.Type == OrderType.StopMarket)
-                {
-                    var stopOrder = (StopMarketOrder)order;
-                    request.Level = stopOrder.StopPrice;
-                }
-                else if (order.Type == OrderType.StopLimit)
-                {
-                    var stopLimitOrder = (StopLimitOrder)order;
-                    request.Level = stopLimitOrder.LimitPrice;
-                }
-                else
-                {
-                    Log.Error($"IGBrokerage.UpdateOrder(): Cannot update order type {order.Type}");
-                    return false;
-                }
-
-                _tradingRateGate.WaitToProceed();
-                var response = _restClient.UpdateOrder(request);
-
-                if (response.Success)
-                {
-                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                    {
-                        Status = OrderStatus.UpdateSubmitted
-                    });
-
-                    Log.Trace($"IGBrokerage.UpdateOrder(): Order {order.Id} updated. DealRef: {response.DealReference}");
-                    return true;
-                }
-                else
-                {
-                    Log.Error($"IGBrokerage.UpdateOrder(): Update failed: {response.Reason}");
-                    return false;
-                }
+                    result = UpdateOrderInternal(order);
+                });
+                return result;
             }
             catch (Exception ex)
             {
                 Log.Error($"IGBrokerage.UpdateOrder(): Error updating order {order.Id}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Internal implementation of order update (called within locked stream)
+        /// </summary>
+        /// <param name="order">The order to update</param>
+        /// <returns>True if the request was made for the order to be updated, false otherwise</returns>
+        private bool UpdateOrderInternal(Order order)
+        {
+            if (!_brokerIdByOrderId.TryGetValue(order.Id, out var dealId))
+            {
+                Log.Error($"IGBrokerage.UpdateOrderInternal(): No broker ID found for order {order.Id}");
+                return false;
+            }
+
+            var request = new IGUpdateOrderRequest
+            {
+                DealId = dealId
+            };
+
+            // Update level based on order type
+            if (order.Type == OrderType.Limit)
+            {
+                var limitOrder = (LimitOrder)order;
+                request.Level = limitOrder.LimitPrice;
+            }
+            else if (order.Type == OrderType.StopMarket)
+            {
+                var stopOrder = (StopMarketOrder)order;
+                request.Level = stopOrder.StopPrice;
+            }
+            else if (order.Type == OrderType.StopLimit)
+            {
+                var stopLimitOrder = (StopLimitOrder)order;
+                request.Level = stopLimitOrder.LimitPrice;
+            }
+            else
+            {
+                Log.Error($"IGBrokerage.UpdateOrderInternal(): Cannot update order type {order.Type}");
+                return false;
+            }
+
+            _tradingRateGate.WaitToProceed();
+            var response = _restClient.UpdateOrder(request);
+
+            if (response.Success)
+            {
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                {
+                    Status = OrderStatus.UpdateSubmitted
+                });
+
+                Log.Trace($"IGBrokerage.UpdateOrderInternal(): Order {order.Id} updated. DealRef: {response.DealReference}");
+                return true;
+            }
+            else
+            {
+                Log.Error($"IGBrokerage.UpdateOrderInternal(): Update failed: {response.Reason}");
                 return false;
             }
         }
@@ -741,38 +777,53 @@ namespace QuantConnect.Brokerages.IG
 
             try
             {
-                if (!_brokerIdByOrderId.TryGetValue(order.Id, out var dealId))
+                var result = false;
+                _messageHandler.WithLockedStream(() =>
                 {
-                    Log.Error($"IGBrokerage.CancelOrder(): No broker ID found for order {order.Id}");
-                    return false;
-                }
-
-                _tradingRateGate.WaitToProceed();
-                var response = _restClient.CancelOrder(dealId);
-
-                if (response.Success)
-                {
-                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                    {
-                        Status = OrderStatus.Canceled
-                    });
-
-                    // Remove from tracking dictionaries
-                    _brokerIdByOrderId.TryRemove(order.Id, out _);
-                    _ordersByBrokerId.TryRemove(dealId, out _);
-
-                    Log.Trace($"IGBrokerage.CancelOrder(): Order {order.Id} canceled. DealRef: {response.DealReference}");
-                    return true;
-                }
-                else
-                {
-                    Log.Error($"IGBrokerage.CancelOrder(): Cancellation failed: {response.Reason}");
-                    return false;
-                }
+                    result = CancelOrderInternal(order);
+                });
+                return result;
             }
             catch (Exception ex)
             {
                 Log.Error($"IGBrokerage.CancelOrder(): Error canceling order {order.Id}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Internal implementation of order cancellation (called within locked stream)
+        /// </summary>
+        /// <param name="order">The order to cancel</param>
+        /// <returns>True if the request was made for the order to be canceled, false otherwise</returns>
+        private bool CancelOrderInternal(Order order)
+        {
+            if (!_brokerIdByOrderId.TryGetValue(order.Id, out var dealId))
+            {
+                Log.Error($"IGBrokerage.CancelOrderInternal(): No broker ID found for order {order.Id}");
+                return false;
+            }
+
+            _tradingRateGate.WaitToProceed();
+            var response = _restClient.CancelOrder(dealId);
+
+            if (response.Success)
+            {
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                {
+                    Status = OrderStatus.Canceled
+                });
+
+                // Remove from tracking dictionaries
+                _brokerIdByOrderId.TryRemove(order.Id, out _);
+                _ordersByBrokerId.TryRemove(dealId, out _);
+
+                Log.Trace($"IGBrokerage.CancelOrderInternal(): Order {order.Id} canceled. DealRef: {response.DealReference}");
+                return true;
+            }
+            else
+            {
+                Log.Error($"IGBrokerage.CancelOrderInternal(): Cancellation failed: {response.Reason}");
                 return false;
             }
         }
@@ -816,8 +867,28 @@ namespace QuantConnect.Brokerages.IG
         /// <param name="job">Job we're subscribing for</param>
         public void SetJob(LiveNodePacket job)
         {
-            // Initialize from job packet if needed
-            // This is called when brokerage is used as IDataQueueHandler without being the brokerage
+            if (job == null)
+            {
+                throw new ArgumentNullException(nameof(job));
+            }
+
+            Log.Trace($"IGBrokerage.SetJob(): Initializing data queue handler for algorithm {job.AlgorithmId}");
+            Log.Trace($"IGBrokerage.SetJob(): Deploy ID: {job.DeployId}, Data Provider: {job.DataQueueHandler}");
+
+            // Validate aggregator is available
+            if (_aggregator == null)
+            {
+                throw new InvalidOperationException("IGBrokerage.SetJob(): Data aggregator not initialized. " +
+                    "Ensure brokerage is created with parameterless constructor for IDataQueueHandler usage.");
+            }
+
+            // Log brokerage configuration if present
+            if (job.BrokerageData != null && job.BrokerageData.Count > 0)
+            {
+                Log.Trace($"IGBrokerage.SetJob(): Loaded {job.BrokerageData.Count} brokerage configuration items");
+            }
+
+            Log.Trace("IGBrokerage.SetJob(): Data queue handler ready for subscriptions");
         }
 
         #endregion
@@ -1121,44 +1192,56 @@ namespace QuantConnect.Brokerages.IG
         }
 
         /// <summary>
+        /// Processes trade/order update events (called by message handler)
+        /// </summary>
+        /// <param name="e">Trade update event args</param>
+        private void ProcessTradeUpdate(IGTradeUpdateEventArgs e)
+        {
+            if (e == null) return;
+
+            Log.Trace($"IGBrokerage.ProcessTradeUpdate(): DealId={e.DealId}, Status={e.Status}, " +
+                     $"Price={e.FilledPrice}, Size={e.FilledSize}");
+
+            // Find the order by broker ID
+            if (!_ordersByBrokerId.TryGetValue(e.DealId, out var order))
+            {
+                Log.Warning($"IGBrokerage.ProcessTradeUpdate(): Order not found for DealId {e.DealId}");
+                return;
+            }
+
+            var status = MapIGStatusToOrderStatus(e.Status);
+
+            var orderEvent = new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+            {
+                Status = status,
+                Message = e.Reason
+            };
+
+            if (status == OrderStatus.Filled || status == OrderStatus.PartiallyFilled)
+            {
+                orderEvent.FillPrice = e.FilledPrice ?? 0;
+                orderEvent.FillQuantity = e.FilledSize ?? 0;
+            }
+
+            // Remove from tracking if filled or cancelled
+            if (status == OrderStatus.Filled || status == OrderStatus.Canceled)
+            {
+                _ordersByBrokerId.TryRemove(e.DealId, out _);
+                _brokerIdByOrderId.TryRemove(order.Id, out _);
+            }
+
+            OnOrderEvent(orderEvent);
+        }
+
+        /// <summary>
         /// Handles trade/order updates from Lightstreamer
         /// </summary>
         private void HandleTradeUpdate(object sender, IGTradeUpdateEventArgs e)
         {
             try
             {
-                Log.Trace($"IGBrokerage.HandleTradeUpdate(): DealId={e.DealId}, Status={e.Status}, " +
-                         $"Price={e.FilledPrice}, Size={e.FilledSize}");
-
-                // Find the order by broker ID
-                if (!_ordersByBrokerId.TryGetValue(e.DealId, out var order))
-                {
-                    Log.Warning($"IGBrokerage.HandleTradeUpdate(): Order not found for DealId {e.DealId}");
-                    return;
-                }
-
-                var status = MapIGStatusToOrderStatus(e.Status);
-
-                var orderEvent = new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = status,
-                    Message = e.Reason
-                };
-
-                if (status == OrderStatus.Filled || status == OrderStatus.PartiallyFilled)
-                {
-                    orderEvent.FillPrice = e.FilledPrice ?? 0;
-                    orderEvent.FillQuantity = e.FilledSize ?? 0;
-                }
-
-                // Remove from tracking if filled or cancelled
-                if (status == OrderStatus.Filled || status == OrderStatus.Canceled)
-                {
-                    _ordersByBrokerId.TryRemove(e.DealId, out _);
-                    _brokerIdByOrderId.TryRemove(order.Id, out _);
-                }
-
-                OnOrderEvent(orderEvent);
+                // Use message handler to ensure thread-safe processing
+                _messageHandler.HandleNewMessage(e);
             }
             catch (Exception ex)
             {
