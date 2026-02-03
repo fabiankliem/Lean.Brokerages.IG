@@ -714,8 +714,81 @@ namespace QuantConnect.Brokerages.IG
         /// <returns>Enumerable of Symbols, that are associated with the provided Symbol</returns>
         public IEnumerable<Symbol> LookupSymbols(Symbol symbol, bool includeExpired, string securityCurrency = null)
         {
-            // TODO: Implement market search via REST API
-            return Enumerable.Empty<Symbol>();
+            if (!_isConnected || _restClient == null)
+            {
+                return Enumerable.Empty<Symbol>();
+            }
+
+            try
+            {
+                // Search for markets using the symbol value
+                var searchTerm = symbol.Value;
+
+                _nonTradingRateGate.WaitToProceed();
+                var markets = _restClient.SearchMarkets(searchTerm);
+
+                var symbols = new List<Symbol>();
+
+                foreach (var market in markets)
+                {
+                    try
+                    {
+                        // Determine security type based on instrument type
+                        SecurityType securityType;
+
+                        switch (market.InstrumentType?.ToUpperInvariant())
+                        {
+                            case "CURRENCIES":
+                                securityType = SecurityType.Forex;
+                                break;
+                            case "INDICES":
+                                securityType = SecurityType.Index;
+                                break;
+                            case "COMMODITIES":
+                                securityType = SecurityType.Cfd;
+                                break;
+                            case "SHARES":
+                                securityType = SecurityType.Equity;
+                                break;
+                            case "CRYPTOCURRENCIES":
+                                securityType = SecurityType.Crypto;
+                                break;
+                            default:
+                                // Default to CFD for unknown types
+                                securityType = SecurityType.Cfd;
+                                break;
+                        }
+
+                        // Try to map the EPIC to a LEAN symbol
+                        var leanSymbol = _symbolMapper.GetLeanSymbol(market.Epic, securityType, Market.IG);
+
+                        if (leanSymbol != null)
+                        {
+                            symbols.Add(leanSymbol);
+                        }
+                        else
+                        {
+                            // If no mapping exists, create a generic symbol
+                            // Use the instrument name as the ticker
+                            var ticker = market.InstrumentName?.Replace(" ", "") ?? market.Epic;
+                            leanSymbol = Symbol.Create(ticker, securityType, Market.IG);
+                            symbols.Add(leanSymbol);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"IGBrokerage.LookupSymbols(): Error processing market {market.Epic}: {ex.Message}");
+                    }
+                }
+
+                Log.Trace($"IGBrokerage.LookupSymbols(): Found {symbols.Count} symbols for search term '{searchTerm}'");
+                return symbols;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.LookupSymbols(): Error searching markets: {ex.Message}");
+                return Enumerable.Empty<Symbol>();
+            }
         }
 
         /// <summary>
