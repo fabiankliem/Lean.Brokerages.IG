@@ -48,6 +48,7 @@ namespace QuantConnect.Brokerages.IG
 
         // API Clients
         private IGRestApiClient _restClient;
+        private IGLightstreamerClient _streamingClient;
 
         // Session tokens
         private string _cst;
@@ -190,14 +191,39 @@ namespace QuantConnect.Brokerages.IG
                     Log.Trace($"IGBrokerage.Connect(): Successfully authenticated. Account: {loginResponse.AccountId}");
 
                     // Switch to specified account if provided
+                    var accountId = _accountId;
                     if (!string.IsNullOrEmpty(_accountId) && _accountId != loginResponse.AccountId)
                     {
                         _nonTradingRateGate.WaitToProceed();
                         _restClient.SwitchAccount(_accountId);
                         Log.Trace($"IGBrokerage.Connect(): Switched to account {_accountId}");
                     }
+                    else
+                    {
+                        accountId = loginResponse.AccountId;
+                    }
 
-                    // TODO: Initialize Lightstreamer client for streaming
+                    // Initialize Lightstreamer client for streaming
+                    _streamingClient = new IGLightstreamerClient(
+                        _lightstreamerEndpoint,
+                        _cst,
+                        _securityToken,
+                        accountId
+                    );
+
+                    // Wire up event handlers
+                    _streamingClient.OnPriceUpdate += HandlePriceUpdate;
+                    _streamingClient.OnTradeUpdate += HandleTradeUpdate;
+                    _streamingClient.OnAccountUpdate += HandleAccountUpdate;
+                    _streamingClient.OnError += HandleStreamingError;
+                    _streamingClient.OnDisconnect += HandleStreamingDisconnect;
+
+                    // Connect to Lightstreamer
+                    _streamingClient.Connect();
+
+                    // Subscribe to trade and account updates
+                    _streamingClient.SubscribeToTradeUpdates();
+                    _streamingClient.SubscribeToAccountUpdates();
 
                     _isConnected = true;
                     Log.Trace("IGBrokerage.Connect(): Successfully connected to IG Markets");
@@ -228,7 +254,19 @@ namespace QuantConnect.Brokerages.IG
 
                 try
                 {
-                    // TODO: Disconnect streaming client
+                    // Disconnect streaming client
+                    if (_streamingClient != null)
+                    {
+                        _streamingClient.OnPriceUpdate -= HandlePriceUpdate;
+                        _streamingClient.OnTradeUpdate -= HandleTradeUpdate;
+                        _streamingClient.OnAccountUpdate -= HandleAccountUpdate;
+                        _streamingClient.OnError -= HandleStreamingError;
+                        _streamingClient.OnDisconnect -= HandleStreamingDisconnect;
+
+                        _streamingClient.Disconnect();
+                        _streamingClient.Dispose();
+                        _streamingClient = null;
+                    }
 
                     // Logout from REST API
                     if (_restClient != null)
@@ -748,7 +786,13 @@ namespace QuantConnect.Brokerages.IG
                 if (!string.IsNullOrEmpty(epic))
                 {
                     _subscribedEpics[symbol] = epic;
-                    // TODO: Subscribe to Lightstreamer price updates for this EPIC
+
+                    // Subscribe to Lightstreamer price updates for this EPIC
+                    if (_streamingClient != null)
+                    {
+                        _streamingClient.SubscribeToPrices(epic);
+                    }
+
                     Log.Trace($"IGBrokerage.Subscribe(): Subscribed to {symbol} (EPIC: {epic})");
                 }
             }
@@ -765,11 +809,169 @@ namespace QuantConnect.Brokerages.IG
             {
                 if (_subscribedEpics.TryRemove(symbol, out var epic))
                 {
-                    // TODO: Unsubscribe from Lightstreamer price updates for this EPIC
+                    // Unsubscribe from Lightstreamer price updates for this EPIC
+                    if (_streamingClient != null)
+                    {
+                        _streamingClient.UnsubscribeFromPrices(epic);
+                    }
+
                     Log.Trace($"IGBrokerage.Unsubscribe(): Unsubscribed from {symbol} (EPIC: {epic})");
                 }
             }
             return true;
+        }
+
+        #endregion
+
+        #region Streaming Event Handlers
+
+        /// <summary>
+        /// Handles price updates from Lightstreamer
+        /// </summary>
+        private void HandlePriceUpdate(object sender, IGPriceUpdateEventArgs e)
+        {
+            try
+            {
+                // Find the LEAN symbol for this EPIC
+                var symbol = _subscribedEpics.FirstOrDefault(kvp => kvp.Value == e.Epic).Key;
+                if (symbol == null)
+                {
+                    return;
+                }
+
+                // Create tick data from price update
+                if (e.Bid.HasValue && e.Ask.HasValue)
+                {
+                    var tick = new Tick
+                    {
+                        Symbol = symbol,
+                        Time = DateTime.UtcNow,
+                        Value = (e.Bid.Value + e.Ask.Value) / 2,
+                        BidPrice = e.Bid.Value,
+                        AskPrice = e.Ask.Value,
+                        TickType = TickType.Quote
+                    };
+
+                    lock (_lock)
+                    {
+                        _aggregator.Update(tick);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.HandlePriceUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles trade/order updates from Lightstreamer
+        /// </summary>
+        private void HandleTradeUpdate(object sender, IGTradeUpdateEventArgs e)
+        {
+            try
+            {
+                Log.Trace($"IGBrokerage.HandleTradeUpdate(): DealId={e.DealId}, Status={e.Status}, " +
+                         $"Price={e.FilledPrice}, Size={e.FilledSize}");
+
+                // Find the order by broker ID
+                if (!_ordersByBrokerId.TryGetValue(e.DealId, out var order))
+                {
+                    Log.Warning($"IGBrokerage.HandleTradeUpdate(): Order not found for DealId {e.DealId}");
+                    return;
+                }
+
+                var status = MapIGStatusToOrderStatus(e.Status);
+
+                var orderEvent = new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                {
+                    Status = status,
+                    Message = e.Reason
+                };
+
+                if (status == OrderStatus.Filled || status == OrderStatus.PartiallyFilled)
+                {
+                    orderEvent.FillPrice = e.FilledPrice ?? 0;
+                    orderEvent.FillQuantity = e.FilledSize ?? 0;
+                }
+
+                // Remove from tracking if filled or cancelled
+                if (status == OrderStatus.Filled || status == OrderStatus.Canceled)
+                {
+                    _ordersByBrokerId.TryRemove(e.DealId, out _);
+                    _brokerIdByOrderId.TryRemove(order.Id, out _);
+                }
+
+                OnOrderEvent(orderEvent);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.HandleTradeUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles account balance updates from Lightstreamer
+        /// </summary>
+        private void HandleAccountUpdate(object sender, IGAccountUpdateEventArgs e)
+        {
+            try
+            {
+                Log.Trace($"IGBrokerage.HandleAccountUpdate(): Balance={e.Balance} {e.Currency}, " +
+                         $"Available={e.AvailableCash}, PnL={e.PnL}");
+
+                // Notify algorithm of account changes if needed
+                OnAccountChanged(new AccountEvent(e.Currency, e.AvailableCash));
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.HandleAccountUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles streaming errors from Lightstreamer
+        /// </summary>
+        private void HandleStreamingError(object sender, IGStreamingErrorEventArgs e)
+        {
+            Log.Error($"IGBrokerage.HandleStreamingError(): Code={e.Code}, Message={e.Message}");
+            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, e.Code, e.Message));
+        }
+
+        /// <summary>
+        /// Handles disconnection from Lightstreamer
+        /// </summary>
+        private void HandleStreamingDisconnect(object sender, EventArgs e)
+        {
+            Log.Warning("IGBrokerage.HandleStreamingDisconnect(): Disconnected from Lightstreamer");
+            _isConnected = false;
+            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Disconnect, -1, "Disconnected from streaming"));
+        }
+
+        /// <summary>
+        /// Maps IG order status to LEAN OrderStatus
+        /// </summary>
+        private OrderStatus MapIGStatusToOrderStatus(string igStatus)
+        {
+            switch (igStatus?.ToUpperInvariant())
+            {
+                case "ACCEPTED":
+                case "OPEN":
+                    return OrderStatus.Submitted;
+                case "AMENDED":
+                    return OrderStatus.UpdateSubmitted;
+                case "DELETED":
+                    return OrderStatus.Canceled;
+                case "REJECTED":
+                    return OrderStatus.Invalid;
+                case "FILLED":
+                    return OrderStatus.Filled;
+                case "PARTIALLY_FILLED":
+                    return OrderStatus.PartiallyFilled;
+                default:
+                    Log.Warning($"IGBrokerage.MapIGStatusToOrderStatus(): Unknown status '{igStatus}'");
+                    return OrderStatus.None;
+            }
         }
 
         #endregion
