@@ -181,6 +181,127 @@ namespace QuantConnect.Brokerages.IG.Tests
             Assert.AreEqual(0.0150m, distance);  // 150 points
         }
 
+        [Test]
+        public void ValidateSubscription_SupportedSymbol_ReturnsTrue()
+        {
+            // Arrange
+            var brokerage = new IGBrokerage();
+            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+
+            // Act
+            var result = (bool)method.Invoke(brokerage,
+                new object[] { symbol, SecurityType.Forex, Resolution.Minute, TickType.Quote });
+
+            // Assert
+            Assert.IsTrue(result, "Should validate supported forex symbol");
+        }
+
+        [Test]
+        public void ValidateSubscription_UnsupportedSecurityType_ReturnsFalse()
+        {
+            // Arrange
+            var brokerage = new IGBrokerage();
+            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+            var symbol = Symbol.Create("ES", SecurityType.Future, Market.IG);
+
+            // Act
+            var result = (bool)method.Invoke(brokerage,
+                new object[] { symbol, SecurityType.Future, Resolution.Minute, TickType.Trade });
+
+            // Assert
+            Assert.IsFalse(result, "Should reject unsupported Future security type");
+        }
+
+        [Test]
+        public void ValidateSubscription_UnmappedSymbol_ReturnsFalse()
+        {
+            // Arrange
+            var brokerage = new IGBrokerage();
+            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+            var symbol = Symbol.Create("INVALIDXYZ", SecurityType.Forex, Market.IG);
+
+            // Act
+            var result = (bool)method.Invoke(brokerage,
+                new object[] { symbol, SecurityType.Forex, Resolution.Minute, TickType.Trade });
+
+            // Assert
+            Assert.IsFalse(result, "Should reject unmapped symbol");
+        }
+
+        [Test]
+        public void ValidateSubscription_TickResolution_ReturnsFalse()
+        {
+            // Arrange
+            var brokerage = new IGBrokerage();
+            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+
+            // Act
+            var result = (bool)method.Invoke(brokerage,
+                new object[] { symbol, SecurityType.Forex, Resolution.Tick, TickType.Quote });
+
+            // Assert
+            Assert.IsFalse(result, "Should reject Tick resolution");
+        }
+
+        [Test]
+        public void ValidateSubscription_OpenInterestTickType_ReturnsFalse()
+        {
+            // Arrange
+            var brokerage = new IGBrokerage();
+            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+
+            // Act
+            var result = (bool)method.Invoke(brokerage,
+                new object[] { symbol, SecurityType.Forex, Resolution.Minute, TickType.OpenInterest });
+
+            // Assert
+            Assert.IsFalse(result, "Should reject OpenInterest tick type");
+        }
+
+        [Test]
+        public void ValidateSubscription_IndexWithQuote_ReturnsTrue()
+        {
+            // Arrange
+            var brokerage = new IGBrokerage();
+            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+            var symbol = Symbol.Create("SPX", SecurityType.Index, Market.IG);
+
+            // Act - Should warn but still return true
+            var result = (bool)method.Invoke(brokerage,
+                new object[] { symbol, SecurityType.Index, Resolution.Minute, TickType.Quote });
+
+            // Assert
+            Assert.IsTrue(result, "Should validate but warn about Index with Quote");
+        }
+
+        [Test]
+        public void ValidateSubscription_MultipleSecurityTypes_ValidatesCorrectly()
+        {
+            // Arrange
+            var brokerage = new IGBrokerage();
+            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+
+            var testCases = new[]
+            {
+                (Symbol.Create("EURUSD", SecurityType.Forex, Market.IG), SecurityType.Forex, true),
+                (Symbol.Create("SPX", SecurityType.Index, Market.IG), SecurityType.Index, true),
+                (Symbol.Create("BTCUSD", SecurityType.Crypto, Market.IG), SecurityType.Crypto, true),
+                (Symbol.Create("XAUUSD", SecurityType.Cfd, Market.IG), SecurityType.Cfd, true),
+                (Symbol.Create("AAPL", SecurityType.Equity, Market.IG), SecurityType.Equity, true),
+            };
+
+            // Act & Assert
+            foreach (var (symbol, secType, expected) in testCases)
+            {
+                var result = (bool)method.Invoke(brokerage,
+                    new object[] { symbol, secType, Resolution.Minute, TickType.Trade });
+                Assert.AreEqual(expected, result, $"Validation failed for {symbol.Value} ({secType})");
+            }
+        }
+
         /// <summary>
         /// Helper method to access private methods via reflection for testing
         /// </summary>

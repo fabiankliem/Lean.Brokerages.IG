@@ -14,33 +14,113 @@
 */
 
 using System;
+using System.Threading;
 using NUnit.Framework;
 using QuantConnect.Tests;
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
 using System.Collections.Generic;
 using QuantConnect.Tests.Brokerages;
+using QuantConnect.Configuration;
+using QuantConnect.Logging;
 
 namespace QuantConnect.Brokerages.IG.Tests
 {
-    [TestFixture, Ignore("Not implemented")]
+    [TestFixture, Explicit("Requires IG Markets credentials")]
     public partial class IGBrokerageTests : BrokerageTests
     {
-        protected override Symbol Symbol { get; }
-        protected override SecurityType SecurityType { get; }
+        protected override Symbol Symbol => Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+        protected override SecurityType SecurityType => SecurityType.Forex;
+
+        [SetUp]
+        public void Setup()
+        {
+            Log.DebuggingEnabled = true;
+            Log.DebuggingLevel = 1;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (Brokerage != null && Brokerage.IsConnected)
+            {
+                Brokerage.Disconnect();
+                Brokerage.Dispose();
+            }
+        }
 
         protected override IBrokerage CreateBrokerage(IOrderProvider orderProvider, ISecurityProvider securityProvider)
         {
-            throw new NotImplementedException();
+            // Get configuration from config.json
+            var apiUrl = Config.Get("ig-api-url", "https://demo-api.ig.com/gateway/deal");
+            var apiKey = Config.Get("ig-api-key");
+            var identifier = Config.Get("ig-identifier");
+            var password = Config.Get("ig-password");
+            var accountId = Config.Get("ig-account-id");
+            var environment = Config.Get("ig-environment", "demo");
+
+            if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(identifier) || string.IsNullOrEmpty(password))
+            {
+                Assert.Ignore("IGBrokerageTests: Credentials not configured in config.json");
+            }
+
+            // Create brokerage instance
+            var brokerage = new IGBrokerage(
+                apiUrl,
+                apiKey,
+                identifier,
+                password,
+                accountId,
+                environment,
+                orderProvider,
+                securityProvider
+            );
+
+            // Connect to IG
+            brokerage.Connect();
+
+            // Wait for connection
+            Thread.Sleep(2000);
+
+            if (!brokerage.IsConnected)
+            {
+                Assert.Fail("IGBrokerage failed to connect");
+            }
+
+            return brokerage;
         }
+
         protected override bool IsAsync()
         {
-            throw new NotImplementedException();
+            // IG uses Lightstreamer for real-time updates
+            // Order events come asynchronously via WebSocket
+            return true;
         }
 
         protected override decimal GetAskPrice(Symbol symbol)
         {
-            throw new NotImplementedException();
+            // Get current market data for the symbol
+            var brokerage = (IGBrokerage)Brokerage;
+            var epic = brokerage.SymbolMapper.GetBrokerageSymbol(symbol);
+
+            if (string.IsNullOrEmpty(epic))
+            {
+                Assert.Fail($"Cannot map symbol {symbol} to IG EPIC");
+            }
+
+            try
+            {
+                // Use IG REST API to get current prices
+                var marketData = brokerage.GetMarketData(epic);
+
+                // Return offer (ask) price
+                return marketData.Offer;
+            }
+            catch (Exception ex)
+            {
+                Assert.Fail($"Failed to get ask price for {symbol}: {ex.Message}");
+                return 0; // Never reached
+            }
         }
 
 
@@ -49,14 +129,18 @@ namespace QuantConnect.Brokerages.IG.Tests
         /// </summary>
         private static IEnumerable<TestCaseData> OrderParameters()
         {
-            yield return new TestCaseData(new MarketOrderTestParameters(Symbols.BTCUSD));
-            yield return new TestCaseData(new LimitOrderTestParameters(Symbols.BTCUSD, 10000m, 0.01m));
-            yield return new TestCaseData(new StopMarketOrderTestParameters(Symbols.BTCUSD, 10000m, 0.01m));
-            yield return new TestCaseData(new StopLimitOrderTestParameters(Symbols.BTCUSD, 10000m, 0.01m));
-            yield return new TestCaseData(new LimitIfTouchedOrderTestParameters(Symbols.BTCUSD, 10000m, 0.01m));
+            // Use forex pairs that IG definitely supports
+            var eurusd = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            yield return new TestCaseData(new MarketOrderTestParameters(eurusd));
+            yield return new TestCaseData(new LimitOrderTestParameters(eurusd, 1.1500m, 1.0500m));
+            yield return new TestCaseData(new StopMarketOrderTestParameters(eurusd, 1.1500m, 1.0500m));
 
-            var optionSymbol = Symbol.CreateOption(Symbols.SPY, Market.USA, OptionStyle.American, OptionRight.Call, 200m, new DateTime(2029, 12, 19));
-            yield return new TestCaseData(new MarketOrderTestParameters(optionSymbol));
+            var gbpusd = Symbol.Create("GBPUSD", SecurityType.Forex, Market.IG);
+            yield return new TestCaseData(new StopLimitOrderTestParameters(gbpusd, 1.3500m, 1.2500m));
+
+            // IG supports indices
+            var spx = Symbol.Create("SPX", SecurityType.Index, Market.IG);
+            yield return new TestCaseData(new MarketOrderTestParameters(spx));
         }
 
         [Test, TestCaseSource(nameof(OrderParameters))]

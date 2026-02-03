@@ -149,6 +149,32 @@ namespace QuantConnect.Brokerages.IG
             _subscriptionManager.UnsubscribeImpl += (s, t) => Unsubscribe(s);
         }
 
+        /// <summary>
+        /// Creates a new instance of the IGBrokerage class for testing
+        /// </summary>
+        /// <param name="apiUrl">The IG API URL (demo or live)</param>
+        /// <param name="apiKey">IG API key</param>
+        /// <param name="identifier">IG account identifier (username)</param>
+        /// <param name="password">IG account password</param>
+        /// <param name="accountId">IG account ID (for multi-account users)</param>
+        /// <param name="environment">Environment (demo or live)</param>
+        /// <param name="orderProvider">Order provider</param>
+        /// <param name="securityProvider">Security provider</param>
+        public IGBrokerage(
+            string apiUrl,
+            string apiKey,
+            string identifier,
+            string password,
+            string accountId,
+            string environment,
+            IOrderProvider orderProvider,
+            ISecurityProvider securityProvider)
+            : this(apiUrl, identifier, password, apiKey, accountId, null, null)
+        {
+            // Store providers for testing
+            // Note: orderProvider and securityProvider are handled by base class
+        }
+
         #endregion
 
         #region IBrokerage Properties
@@ -162,6 +188,37 @@ namespace QuantConnect.Brokerages.IG
         /// Specifies whether the brokerage will instantly update account balances
         /// </summary>
         public bool AccountInstantlyUpdated => true;
+
+        #endregion
+
+        #region Internal/Testing Properties and Methods
+
+        /// <summary>
+        /// Symbol mapper for testing purposes
+        /// </summary>
+        internal IGSymbolMapper SymbolMapper => _symbolMapper;
+
+        /// <summary>
+        /// Gets current market data for the specified EPIC
+        /// Internal method for testing purposes
+        /// </summary>
+        /// <param name="epic">IG EPIC code</param>
+        /// <returns>Market data with bid/offer prices</returns>
+        internal dynamic GetMarketData(string epic)
+        {
+            _nonTradingRateGate.WaitToProceed();
+
+            var endpoint = $"/markets/{epic}";
+            var response = _restClient.Get(endpoint);
+
+            return new
+            {
+                Bid = (decimal)response.snapshot.bid,
+                Offer = (decimal)response.snapshot.offer,
+                High = (decimal)response.snapshot.high,
+                Low = (decimal)response.snapshot.low
+            };
+        }
 
         #endregion
 
@@ -237,6 +294,9 @@ namespace QuantConnect.Brokerages.IG
 
                     _isConnected = true;
                     Log.Trace("IGBrokerage.Connect(): Successfully connected to IG Markets");
+
+                    // Validate subscriptions if algorithm is available
+                    ValidateSubscriptions();
                 }
                 catch (Exception ex)
                 {
@@ -876,13 +936,98 @@ namespace QuantConnect.Brokerages.IG
                 return false;
             }
 
-            // Check if security type is supported
-            var securityType = symbol.SecurityType;
-            return securityType == SecurityType.Forex ||
-                   securityType == SecurityType.Cfd ||
-                   securityType == SecurityType.Crypto ||
-                   securityType == SecurityType.Index ||
-                   securityType == SecurityType.Equity;
+            // Use centralized validation
+            return ValidateSubscription(symbol, symbol.SecurityType, Resolution.Minute, TickType.Trade);
+        }
+
+        /// <summary>
+        /// Validates that the brokerage supports the requested subscription
+        /// Called during initialization to catch configuration errors early
+        /// </summary>
+        /// <param name="symbol">Symbol to validate</param>
+        /// <param name="securityType">Security type</param>
+        /// <param name="resolution">Data resolution</param>
+        /// <param name="tickType">Tick type</param>
+        /// <returns>True if subscription is valid</returns>
+        private bool ValidateSubscription(Symbol symbol, SecurityType securityType, Resolution resolution, TickType tickType)
+        {
+            // Validate security type is supported
+            if (!_supportedSecurityTypes.Contains(securityType))
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UnsupportedSecurityType",
+                    $"IG Markets does not support {securityType}. Supported types: {string.Join(", ", _supportedSecurityTypes)}"));
+                return false;
+            }
+
+            // Validate symbol can be mapped
+            var epic = _symbolMapper.GetBrokerageSymbol(symbol);
+            if (string.IsNullOrEmpty(epic))
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UnmappedSymbol",
+                    $"Symbol {symbol} cannot be mapped to IG EPIC. Use symbol mapper or SearchMarkets API."));
+                return false;
+            }
+
+            // Validate resolution is supported for history
+            if (resolution == Resolution.Tick)
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UnsupportedResolution",
+                    $"IG Markets does not support {resolution} historical data. Use Second or higher."));
+                return false;
+            }
+
+            // Validate tick type combinations
+            if (tickType == TickType.OpenInterest)
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UnsupportedTickType",
+                    $"IG Markets does not support OpenInterest data."));
+                return false;
+            }
+
+            // Forex and CFD typically support both quote and trade
+            // Indices typically only support trade
+            if (securityType == SecurityType.Index && tickType == TickType.Quote)
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UnsupportedTickType",
+                    $"Index {symbol} may not support quote data. Try TickType.Trade."));
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Validates that all current subscriptions are supported by the brokerage
+        /// Should be called during initialization
+        /// </summary>
+        private void ValidateSubscriptions()
+        {
+            if (_algorithm == null)
+                return;
+
+            Log.Trace("IGBrokerage.ValidateSubscriptions(): Validating algorithm subscriptions...");
+
+            var subscriptions = _algorithm.SubscriptionManager.Subscriptions;
+            var invalidCount = 0;
+
+            foreach (var subscription in subscriptions)
+            {
+                var symbol = subscription.Symbol;
+                var config = subscription.Configuration;
+
+                if (!ValidateSubscription(symbol, config.SecurityType, config.Resolution, config.TickType))
+                {
+                    invalidCount++;
+                }
+            }
+
+            if (invalidCount > 0)
+            {
+                Log.Trace($"IGBrokerage.ValidateSubscriptions(): Found {invalidCount} potentially invalid subscriptions");
+            }
+            else
+            {
+                Log.Trace("IGBrokerage.ValidateSubscriptions(): All subscriptions validated successfully");
+            }
         }
 
         /// <summary>
