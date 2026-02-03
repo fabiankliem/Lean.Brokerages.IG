@@ -74,6 +74,16 @@ namespace QuantConnect.Brokerages.IG
         // Symbol mapper
         private readonly IGSymbolMapper _symbolMapper;
 
+        // Supported security types for validation
+        private static readonly HashSet<SecurityType> _supportedSecurityTypes = new HashSet<SecurityType>
+        {
+            SecurityType.Forex,
+            SecurityType.Index,
+            SecurityType.Cfd,
+            SecurityType.Crypto,
+            SecurityType.Equity
+        };
+
         #endregion
 
         #region Constructors

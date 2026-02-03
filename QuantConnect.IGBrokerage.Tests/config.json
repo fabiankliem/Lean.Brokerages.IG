@@ -1,3 +1,9 @@
 {
-  "data-folder": "../../../../Lean/Data/"
+  "data-folder": "../../../../Lean/Data/",
+  "ig-api-url": "https://demo-api.ig.com/gateway/deal",
+  "ig-api-key": "",
+  "ig-identifier": "",
+  "ig-password": "",
+  "ig-account-id": "",
+  "ig-environment": "demo"
 }
