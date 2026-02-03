@@ -17,6 +17,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using QuantConnect.Brokerages.IG.Api;
+using QuantConnect.Brokerages.IG.Models;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
@@ -43,6 +45,9 @@ namespace QuantConnect.Brokerages.IG
         private readonly string _accountId;
         private readonly IAlgorithm _algorithm;
         private readonly IDataAggregator _aggregator;
+
+        // API Clients
+        private IGRestApiClient _restClient;
 
         // Session tokens
         private string _cst;
@@ -168,7 +173,30 @@ namespace QuantConnect.Brokerages.IG
 
                 try
                 {
-                    // TODO: Initialize REST client and authenticate
+                    // Initialize REST client
+                    _restClient = new IGRestApiClient(_apiUrl, _apiKey);
+
+                    // Authenticate with IG
+                    _nonTradingRateGate.WaitToProceed();
+                    var loginResponse = _restClient.Login(_identifier, _password);
+
+                    _cst = loginResponse.Cst;
+                    _securityToken = loginResponse.SecurityToken;
+                    _lightstreamerEndpoint = loginResponse.LightstreamerEndpoint;
+
+                    // Set session tokens for subsequent requests
+                    _restClient.SetSessionTokens(_cst, _securityToken);
+
+                    Log.Trace($"IGBrokerage.Connect(): Successfully authenticated. Account: {loginResponse.AccountId}");
+
+                    // Switch to specified account if provided
+                    if (!string.IsNullOrEmpty(_accountId) && _accountId != loginResponse.AccountId)
+                    {
+                        _nonTradingRateGate.WaitToProceed();
+                        _restClient.SwitchAccount(_accountId);
+                        Log.Trace($"IGBrokerage.Connect(): Switched to account {_accountId}");
+                    }
+
                     // TODO: Initialize Lightstreamer client for streaming
 
                     _isConnected = true;
@@ -177,6 +205,7 @@ namespace QuantConnect.Brokerages.IG
                 catch (Exception ex)
                 {
                     Log.Error($"IGBrokerage.Connect(): Failed to connect: {ex.Message}");
+                    _isConnected = false;
                     throw;
                 }
             }
@@ -200,7 +229,14 @@ namespace QuantConnect.Brokerages.IG
                 try
                 {
                     // TODO: Disconnect streaming client
-                    // TODO: Logout from REST API
+
+                    // Logout from REST API
+                    if (_restClient != null)
+                    {
+                        _restClient.Logout();
+                        _restClient.Dispose();
+                        _restClient = null;
+                    }
 
                     _isConnected = false;
                     Log.Trace("IGBrokerage.Disconnect(): Disconnected from IG Markets");
@@ -224,8 +260,56 @@ namespace QuantConnect.Brokerages.IG
         {
             Log.Trace("IGBrokerage.GetOpenOrders(): Fetching open orders...");
 
-            // TODO: Implement REST API call to get working orders
-            return new List<Order>();
+            try
+            {
+                _nonTradingRateGate.WaitToProceed();
+                var workingOrders = _restClient.GetWorkingOrders();
+
+                var orders = new List<Order>();
+
+                foreach (var wo in workingOrders)
+                {
+                    var symbol = _symbolMapper.GetLeanSymbol(wo.Epic, SecurityType.Forex, Market.IG);
+                    if (symbol == null)
+                    {
+                        Log.Trace($"IGBrokerage.GetOpenOrders(): Unable to map EPIC {wo.Epic} to LEAN symbol");
+                        continue;
+                    }
+
+                    var direction = wo.Direction == "BUY" ? OrderDirection.Buy : OrderDirection.Sell;
+                    var quantity = direction == OrderDirection.Buy ? wo.Size : -wo.Size;
+
+                    Order order;
+                    if (wo.OrderType == "LIMIT")
+                    {
+                        order = new LimitOrder(symbol, quantity, wo.Level, wo.CreatedDate);
+                    }
+                    else if (wo.OrderType == "STOP")
+                    {
+                        order = new StopMarketOrder(symbol, quantity, wo.Level, wo.CreatedDate);
+                    }
+                    else
+                    {
+                        Log.Trace($"IGBrokerage.GetOpenOrders(): Unsupported order type {wo.OrderType} for {symbol}");
+                        continue;
+                    }
+
+                    // Store broker ID mapping
+                    _ordersByBrokerId[wo.DealId] = order;
+                    _brokerIdByOrderId[order.Id] = wo.DealId;
+
+                    orders.Add(order);
+
+                    Log.Trace($"IGBrokerage.GetOpenOrders(): {symbol} - {quantity} @ {wo.Level} ({wo.OrderType})");
+                }
+
+                return orders;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.GetOpenOrders(): Error: {ex.Message}");
+                return new List<Order>();
+            }
         }
 
         /// <summary>
@@ -236,8 +320,44 @@ namespace QuantConnect.Brokerages.IG
         {
             Log.Trace("IGBrokerage.GetAccountHoldings(): Fetching account holdings...");
 
-            // TODO: Implement REST API call to get positions
-            return new List<Holding>();
+            try
+            {
+                _nonTradingRateGate.WaitToProceed();
+                var positions = _restClient.GetPositions();
+
+                var holdings = new List<Holding>();
+
+                foreach (var position in positions)
+                {
+                    var symbol = _symbolMapper.GetLeanSymbol(position.Epic, SecurityType.Forex, Market.IG);
+                    if (symbol == null)
+                    {
+                        Log.Trace($"IGBrokerage.GetAccountHoldings(): Unable to map EPIC {position.Epic} to LEAN symbol");
+                        continue;
+                    }
+
+                    var quantity = position.Direction == "BUY" ? position.Size : -position.Size;
+
+                    holdings.Add(new Holding
+                    {
+                        Symbol = symbol,
+                        Type = symbol.SecurityType,
+                        Quantity = quantity,
+                        AveragePrice = position.OpenLevel,
+                        MarketPrice = position.CurrentLevel,
+                        CurrencySymbol = position.Currency ?? "GBP"
+                    });
+
+                    Log.Trace($"IGBrokerage.GetAccountHoldings(): {symbol} - {quantity} @ {position.OpenLevel}");
+                }
+
+                return holdings;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.GetAccountHoldings(): Error: {ex.Message}");
+                return new List<Holding>();
+            }
         }
 
         /// <summary>
@@ -248,8 +368,34 @@ namespace QuantConnect.Brokerages.IG
         {
             Log.Trace("IGBrokerage.GetCashBalance(): Fetching cash balance...");
 
-            // TODO: Implement REST API call to get account balance
-            return new List<CashAmount>();
+            try
+            {
+                _nonTradingRateGate.WaitToProceed();
+                var accounts = _restClient.GetAccounts();
+
+                var cashAmounts = new List<CashAmount>();
+
+                // Find the current account or use the first one
+                var account = accounts.FirstOrDefault(a => a.AccountId == _accountId) ?? accounts.FirstOrDefault();
+
+                if (account != null)
+                {
+                    cashAmounts.Add(new CashAmount(
+                        account.Balance.Available,
+                        account.Currency ?? "GBP"
+                    ));
+
+                    Log.Trace($"IGBrokerage.GetCashBalance(): Account {account.AccountId} - " +
+                             $"{account.Balance.Available} {account.Currency} available");
+                }
+
+                return cashAmounts;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.GetCashBalance(): Error: {ex.Message}");
+                return new List<CashAmount>();
+            }
         }
 
         /// <summary>
@@ -261,8 +407,100 @@ namespace QuantConnect.Brokerages.IG
         {
             Log.Trace($"IGBrokerage.PlaceOrder(): Placing order {order.Id} for {order.Symbol}");
 
-            // TODO: Implement REST API call to place order
-            return false;
+            try
+            {
+                var epic = _symbolMapper.GetBrokerageSymbol(order.Symbol);
+                if (string.IsNullOrEmpty(epic))
+                {
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Invalid,
+                        Message = $"Unable to map symbol {order.Symbol} to IG EPIC"
+                    });
+                    return false;
+                }
+
+                var request = new IGPlaceOrderRequest
+                {
+                    Epic = epic,
+                    Direction = order.Quantity > 0 ? "BUY" : "SELL",
+                    Size = Math.Abs(order.Quantity),
+                    CurrencyCode = "GBP",
+                    Expiry = "DFB", // Daily funded bet (CFD)
+                    ForceOpen = true,
+                    GuaranteedStop = false
+                };
+
+                // Set order type specific parameters
+                if (order.Type == OrderType.Market || order.Type == OrderType.MarketOnOpen)
+                {
+                    request.OrderType = "MARKET";
+                }
+                else if (order.Type == OrderType.Limit)
+                {
+                    var limitOrder = (LimitOrder)order;
+                    request.OrderType = "LIMIT";
+                    request.Level = limitOrder.LimitPrice;
+                }
+                else if (order.Type == OrderType.StopMarket)
+                {
+                    var stopOrder = (StopMarketOrder)order;
+                    request.OrderType = "STOP";
+                    request.Level = stopOrder.StopPrice;
+                }
+                else if (order.Type == OrderType.StopLimit)
+                {
+                    var stopLimitOrder = (StopLimitOrder)order;
+                    request.OrderType = "LIMIT";
+                    request.Level = stopLimitOrder.LimitPrice;
+                }
+                else
+                {
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Invalid,
+                        Message = $"Unsupported order type: {order.Type}"
+                    });
+                    return false;
+                }
+
+                _tradingRateGate.WaitToProceed();
+                var response = _restClient.PlaceOrder(request);
+
+                if (response.Success)
+                {
+                    // Store broker ID mapping
+                    _brokerIdByOrderId[order.Id] = response.DealReference;
+                    _ordersByBrokerId[response.DealReference] = order;
+
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Submitted
+                    });
+
+                    Log.Trace($"IGBrokerage.PlaceOrder(): Order {order.Id} submitted. DealRef: {response.DealReference}");
+                    return true;
+                }
+                else
+                {
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Invalid,
+                        Message = response.Reason ?? "Order placement failed"
+                    });
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.PlaceOrder(): Error placing order {order.Id}: {ex.Message}");
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                {
+                    Status = OrderStatus.Invalid,
+                    Message = ex.Message
+                });
+                return false;
+            }
         }
 
         /// <summary>
@@ -274,8 +512,65 @@ namespace QuantConnect.Brokerages.IG
         {
             Log.Trace($"IGBrokerage.UpdateOrder(): Updating order {order.Id}");
 
-            // TODO: Implement REST API call to update order
-            return false;
+            try
+            {
+                if (!_brokerIdByOrderId.TryGetValue(order.Id, out var dealId))
+                {
+                    Log.Error($"IGBrokerage.UpdateOrder(): No broker ID found for order {order.Id}");
+                    return false;
+                }
+
+                var request = new IGUpdateOrderRequest
+                {
+                    DealId = dealId
+                };
+
+                // Update level based on order type
+                if (order.Type == OrderType.Limit)
+                {
+                    var limitOrder = (LimitOrder)order;
+                    request.Level = limitOrder.LimitPrice;
+                }
+                else if (order.Type == OrderType.StopMarket)
+                {
+                    var stopOrder = (StopMarketOrder)order;
+                    request.Level = stopOrder.StopPrice;
+                }
+                else if (order.Type == OrderType.StopLimit)
+                {
+                    var stopLimitOrder = (StopLimitOrder)order;
+                    request.Level = stopLimitOrder.LimitPrice;
+                }
+                else
+                {
+                    Log.Error($"IGBrokerage.UpdateOrder(): Cannot update order type {order.Type}");
+                    return false;
+                }
+
+                _tradingRateGate.WaitToProceed();
+                var response = _restClient.UpdateOrder(request);
+
+                if (response.Success)
+                {
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.UpdateSubmitted
+                    });
+
+                    Log.Trace($"IGBrokerage.UpdateOrder(): Order {order.Id} updated. DealRef: {response.DealReference}");
+                    return true;
+                }
+                else
+                {
+                    Log.Error($"IGBrokerage.UpdateOrder(): Update failed: {response.Reason}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.UpdateOrder(): Error updating order {order.Id}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -287,8 +582,42 @@ namespace QuantConnect.Brokerages.IG
         {
             Log.Trace($"IGBrokerage.CancelOrder(): Canceling order {order.Id}");
 
-            // TODO: Implement REST API call to cancel order
-            return false;
+            try
+            {
+                if (!_brokerIdByOrderId.TryGetValue(order.Id, out var dealId))
+                {
+                    Log.Error($"IGBrokerage.CancelOrder(): No broker ID found for order {order.Id}");
+                    return false;
+                }
+
+                _tradingRateGate.WaitToProceed();
+                var response = _restClient.CancelOrder(dealId);
+
+                if (response.Success)
+                {
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Canceled
+                    });
+
+                    // Remove from tracking dictionaries
+                    _brokerIdByOrderId.TryRemove(order.Id, out _);
+                    _ordersByBrokerId.TryRemove(dealId, out _);
+
+                    Log.Trace($"IGBrokerage.CancelOrder(): Order {order.Id} canceled. DealRef: {response.DealReference}");
+                    return true;
+                }
+                else
+                {
+                    Log.Error($"IGBrokerage.CancelOrder(): Cancellation failed: {response.Reason}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.CancelOrder(): Error canceling order {order.Id}: {ex.Message}");
+                return false;
+            }
         }
 
         #endregion
