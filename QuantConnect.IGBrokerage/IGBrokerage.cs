@@ -729,28 +729,7 @@ namespace QuantConnect.Brokerages.IG
 
         #endregion
 
-        #region History Provider
-
-        /// <summary>
-        /// Gets the history for the requested symbols
-        /// </summary>
-        /// <param name="request">The historical data request</param>
-        /// <returns>An enumerable of bars covering the span specified in the request</returns>
-        public override IEnumerable<BaseData> GetHistory(Data.HistoryRequest request)
-        {
-            if (!CanSubscribe(request.Symbol))
-            {
-                return null;
-            }
-
-            Log.Trace($"IGBrokerage.GetHistory(): Fetching history for {request.Symbol} " +
-                      $"from {request.StartTimeUtc} to {request.EndTimeUtc}");
-
-            // TODO: Implement REST API call to get historical prices
-            return Enumerable.Empty<BaseData>();
-        }
-
-        #endregion
+        // History Provider implementation moved to IGBrokerage.History.cs partial class
 
         #region Private Methods
 
