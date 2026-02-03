@@ -2,17 +2,17 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <TargetFramework>net10.0</TargetFramework>
-    <Product>QuantConnect.Brokerages.Template</Product>
-    <AssemblyName>QuantConnect.Brokerages.Template</AssemblyName>
-    <RootNamespace>QuantConnect.Brokerages.Template</RootNamespace>
-    <AssemblyTitle>QuantConnect.Brokerages.Template</AssemblyTitle>
+    <TargetFramework>net6.0</TargetFramework>
+    <Product>QuantConnect.Brokerages.IG</Product>
+    <AssemblyName>QuantConnect.Brokerages.IG</AssemblyName>
+    <RootNamespace>QuantConnect.Brokerages.IG</RootNamespace>
+    <AssemblyTitle>QuantConnect.Brokerages.IG</AssemblyTitle>
     <OutputType>Library</OutputType>
     <OutputPath>bin\$(Configuration)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <Description>QuantConnect LEAN Template Brokerage: Brokerage Template plugin for Lean</Description>
+    <Description>QuantConnect LEAN IG Brokerage: Brokerage IG plugin for Lean</Description>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugType>full</DebugType>
@@ -27,6 +27,9 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
-    <PackageReference Include="QuantConnect.Brokerages" Version="2.5.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Lean\Brokerages\QuantConnect.Brokerages.csproj" />
+    <ProjectReference Include="..\..\Lean\Common\QuantConnect.csproj" />
   </ItemGroup>
 </Project>

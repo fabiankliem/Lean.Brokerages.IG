@@ -4,17 +4,17 @@
         <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
         <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net10.0</TargetFramework>
+        <TargetFramework>net6.0</TargetFramework>
         <Copyright>Copyright ©  2021</Copyright>
         <OutputPath>bin\$(Configuration)\</OutputPath>
-        <Product>QuantConnect.Brokerages.Template.ToolBox</Product>
-        <AssemblyName>QuantConnect.Brokerages.Template.ToolBox</AssemblyName>
-        <RootNamespace>QuantConnect.Brokerages.Template.ToolBox</RootNamespace>
-        <AssemblyTitle>QuantConnect.Brokerages.Template.ToolBox</AssemblyTitle>
+        <Product>QuantConnect.Brokerages.IG.ToolBox</Product>
+        <AssemblyName>QuantConnect.Brokerages.IG.ToolBox</AssemblyName>
+        <RootNamespace>QuantConnect.Brokerages.IG.ToolBox</RootNamespace>
+        <AssemblyTitle>QuantConnect.Brokerages.IG.ToolBox</AssemblyTitle>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-        <Description>QuantConnect LEAN Template Brokerage: Brokerage Template toolbox plugin for Lean</Description>
+        <Description>QuantConnect LEAN IG Brokerage: Brokerage IG toolbox plugin for Lean</Description>
     </PropertyGroup>
     <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
         <DebugType>full</DebugType>
@@ -28,6 +28,7 @@
         <Compile Include="..\..\Lean\Common\Properties\SharedAssemblyInfo.cs" Link="Properties\SharedAssemblyInfo.cs" />
     </ItemGroup>
     <ItemGroup>
-        <PackageReference Include="QuantConnect.ToolBox" Version="2.5.*" />
+        <ProjectReference Include="..\..\Lean\ToolBox\QuantConnect.ToolBox.csproj" />
+        <ProjectReference Include="..\QuantConnect.IGBrokerage\QuantConnect.IGBrokerage.csproj" />
     </ItemGroup>
 </Project>

@@ -23,10 +23,10 @@ using QuantConnect.Securities;
 using QuantConnect.Data.Market;
 using QuantConnect.Lean.Engine.HistoricalData;
 
-namespace QuantConnect.Brokerages.Template.Tests
+namespace QuantConnect.Brokerages.IG.Tests
 {
     [TestFixture, Ignore("Not implemented")]
-    public class TemplateBrokerageHistoryProviderTests
+    public class IGBrokerageHistoryProviderTests
     {
         private static TestCaseData[] TestParameters
         {
@@ -60,7 +60,7 @@ namespace QuantConnect.Brokerages.Template.Tests
         [Test, TestCaseSource(nameof(TestParameters))]
         public void GetsHistory(Symbol symbol, Resolution resolution, TimeSpan period, TickType tickType, Type dataType, bool invalidRequest)
         {
-            var brokerage = new TemplateBrokerage(null);
+            var brokerage = new IGBrokerage(null);
 
             var historyProvider = new BrokerageHistoryProvider();
             historyProvider.SetBrokerage(brokerage);

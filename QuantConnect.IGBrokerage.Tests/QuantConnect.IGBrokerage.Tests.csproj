@@ -3,16 +3,16 @@
     <PropertyGroup>
         <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
         <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-        <TargetFramework>net10.0</TargetFramework>
+        <TargetFramework>net6.0</TargetFramework>
 
         <IsPackable>false</IsPackable>
         <Copyright>Copyright ©  2021</Copyright>
         <TestProjectType>UnitTest</TestProjectType>
         <OutputPath>bin\$(Configuration)\</OutputPath>
-        <Product>QuantConnect.Brokerages.Template.Tests</Product>
-        <AssemblyName>QuantConnect.Brokerages.Template.Tests</AssemblyName>
-        <RootNamespace>QuantConnect.Brokerages.Template.Tests</RootNamespace>
-        <AssemblyTitle>QuantConnect.Brokerages.Template.Tests</AssemblyTitle>
+        <Product>QuantConnect.Brokerages.IG.Tests</Product>
+        <AssemblyName>QuantConnect.Brokerages.IG.Tests</AssemblyName>
+        <RootNamespace>QuantConnect.Brokerages.IG.Tests</RootNamespace>
+        <AssemblyTitle>QuantConnect.Brokerages.IG.Tests</AssemblyTitle>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     </PropertyGroup>
 
@@ -30,8 +30,8 @@
     </ItemGroup>
     <ItemGroup>
       <ProjectReference Include="..\..\Lean\Tests\QuantConnect.Tests.csproj" />
-      <ProjectReference Include="..\QuantConnect.TemplateBrokerage.ToolBox\QuantConnect.TemplateBrokerage.ToolBox.csproj" />
-      <ProjectReference Include="..\QuantConnect.TemplateBrokerage\QuantConnect.TemplateBrokerage.csproj" />
+      <ProjectReference Include="..\QuantConnect.IGBrokerage.ToolBox\QuantConnect.IGBrokerage.ToolBox.csproj" />
+      <ProjectReference Include="..\QuantConnect.IGBrokerage\QuantConnect.IGBrokerage.csproj" />
     </ItemGroup>
 
     <ItemGroup>

@@ -17,15 +17,15 @@ using NUnit.Framework;
 using QuantConnect.Util;
 using QuantConnect.Interfaces;
 
-namespace QuantConnect.Brokerages.Template.Tests
+namespace QuantConnect.Brokerages.IG.Tests
 {
     [TestFixture]
-    public class TemplateBrokerageAdditionalTests
+    public class IGBrokerageAdditionalTests
     {
         [Test]
         public void ParameterlessConstructorComposerUsage()
         {
-            var brokerage = Composer.Instance.GetExportedValueByTypeName<IDataQueueHandler>("TemplateBrokerage");
+            var brokerage = Composer.Instance.GetExportedValueByTypeName<IDataQueueHandler>("IGBrokerage");
             Assert.IsNotNull(brokerage);
         }
     }
