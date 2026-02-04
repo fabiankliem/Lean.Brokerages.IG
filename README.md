@@ -1,11 +1,24 @@
 ![lean-brokerage-template](https://user-images.githubusercontent.com/18473240/131904120-f67dab9c-cc6f-4c08-83e9-5d3ffafdb85d.png)
 
 
-# Lean.Brokerages.Template
+# Lean.Brokerages.IG
 
-[![Build Status](https://github.com/QuantConnect/Lean.Brokerages.Template/workflows/Build%20%26%20Test/badge.svg)](https://github.com/QuantConnect/Lean.Brokerages.Template/actions?query=workflow%3A%22Build%20%26%20Test%22)
- 
-Template Brokerage Plugin for [Lean](https://github.com/QuantConnect/Lean)
+[![Build Status](https://github.com/fabiankliem/Lean.Brokerages.IG/workflows/Build%20%26%20Test/badge.svg)](https://github.com/fabiankliem/Lean.Brokerages.IG/actions?query=workflow%3A%22Build%20%26%20Test%22)
+
+IG Markets Brokerage Plugin for [Lean](https://github.com/QuantConnect/Lean)
+
+## About IG Markets
+
+[IG Markets](https://www.ig.com/) is a leading global CFD and spread betting provider with access to forex, indices, commodities, cryptocurrencies, and equities. This plugin enables live trading and historical data access through IG's REST API and Lightstreamer streaming platform.
+
+**Key Features:**
+- **Live Trading**: Market, Limit, Stop, and StopLimit orders
+- **Streaming Data**: Real-time quotes via Lightstreamer WebSocket
+- **Historical Data**: Minute, Hour, and Daily resolution
+- **Security Types**: Forex, Index, CFD, Crypto, Equity
+- **Risk Management**: Stop-loss and take-profit support
+
+**API Documentation**: [IG Labs](https://labs.ig.com/)
 
 See the [brokerage development guide](https://www.quantconnect.com/tutorials/open-source/brokerage-development-guide)
 

@@ -77,6 +77,10 @@ namespace QuantConnect.Brokerages.IG
         // Concurrent message handler for thread-safe order operations
         private readonly BrokerageConcurrentMessageHandler<IGTradeUpdateEventArgs> _messageHandler;
 
+        // ReSubscription infrastructure for automatic reconnection
+        private CancellationTokenSource _cancellationTokenSource;
+        private Task _reconnectionMonitorTask;
+
         // Supported security types for validation
         private static readonly HashSet<SecurityType> _supportedSecurityTypes = new HashSet<SecurityType>
         {
@@ -153,6 +157,9 @@ namespace QuantConnect.Brokerages.IG
 
             // Initialize concurrent message handler for thread-safe order operations
             _messageHandler = new BrokerageConcurrentMessageHandler<IGTradeUpdateEventArgs>(ProcessTradeUpdate);
+
+            // Initialize cancellation token for reconnection monitoring
+            _cancellationTokenSource = new CancellationTokenSource();
         }
 
         /// <summary>
@@ -303,6 +310,12 @@ namespace QuantConnect.Brokerages.IG
 
                     // Validate subscriptions if algorithm is available
                     ValidateSubscriptions();
+
+                    // Start reconnection monitoring
+                    _reconnectionMonitorTask = Task.Run(() =>
+                        MonitorOrderConnection(_cancellationTokenSource.Token));
+
+                    Log.Trace("IGBrokerage.Connect(): Started connection monitoring");
                 }
                 catch (Exception ex)
                 {
@@ -320,6 +333,23 @@ namespace QuantConnect.Brokerages.IG
         {
             if (!_isConnected)
                 return;
+
+            // Cancel reconnection monitoring
+            _cancellationTokenSource?.Cancel();
+
+            // Wait for monitoring task to complete
+            if (_reconnectionMonitorTask != null)
+            {
+                try
+                {
+                    _reconnectionMonitorTask.Wait(TimeSpan.FromSeconds(5));
+                    Log.Trace("IGBrokerage.Disconnect(): Connection monitoring stopped");
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"IGBrokerage.Disconnect(): Error stopping monitoring: {ex.Message}");
+                }
+            }
 
             lock (_lock)
             {
@@ -360,6 +390,81 @@ namespace QuantConnect.Brokerages.IG
                     Log.Error($"IGBrokerage.Disconnect(): Error during disconnect: {ex.Message}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources
+        /// </summary>
+        public override void Dispose()
+        {
+            // Disconnect if still connected
+            Disconnect();
+
+            // Dispose cancellation token source
+            _cancellationTokenSource?.Dispose();
+
+            // Dispose message handler
+            _messageHandler?.Dispose();
+
+            // Dispose rate gates
+            _tradingRateGate?.Dispose();
+            _nonTradingRateGate?.Dispose();
+
+            base.Dispose();
+        }
+
+        /// <summary>
+        /// Initializes the brokerage connection with comprehensive validation
+        /// </summary>
+        /// <remarks>
+        /// This method consolidates connection and validation logic into a single call.
+        /// Recommended usage pattern: Call Initialize() instead of Connect() for production code.
+        /// </remarks>
+        public void Initialize()
+        {
+            if (_isConnected)
+            {
+                Log.Trace("IGBrokerage.Initialize(): Already initialized and connected");
+                return;
+            }
+
+            Log.Trace("IGBrokerage.Initialize(): Initializing IG Markets brokerage...");
+
+            // Validate required configuration
+            if (string.IsNullOrEmpty(_apiKey) || string.IsNullOrEmpty(_identifier) || string.IsNullOrEmpty(_password))
+            {
+                throw new InvalidOperationException(
+                    "IGBrokerage.Initialize(): Missing required credentials. " +
+                    "Ensure ig-api-key, ig-identifier, and ig-password are configured."
+                );
+            }
+
+            if (string.IsNullOrEmpty(_apiUrl))
+            {
+                throw new InvalidOperationException(
+                    "IGBrokerage.Initialize(): Missing API URL. " +
+                    "Ensure ig-api-url is configured."
+                );
+            }
+
+            // Connect to IG Markets
+            try
+            {
+                Connect();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.Initialize(): Connection failed: {ex.Message}");
+                throw new Exception($"Failed to initialize IG Markets brokerage: {ex.Message}", ex);
+            }
+
+            // Verify connection was successful
+            if (!IsConnected)
+            {
+                throw new Exception("IGBrokerage.Initialize(): Connection succeeded but IsConnected returned false");
+            }
+
+            Log.Trace("IGBrokerage.Initialize(): Initialization complete. Ready for trading.");
         }
 
         #endregion
@@ -1221,6 +1326,13 @@ namespace QuantConnect.Brokerages.IG
             {
                 orderEvent.FillPrice = e.FilledPrice ?? 0;
                 orderEvent.FillQuantity = e.FilledSize ?? 0;
+
+                // Calculate order fees for filled orders
+                orderEvent.OrderFee = IGOrderFeeCalculator.CalculateFee(
+                    order,
+                    orderEvent.FillPrice,
+                    orderEvent.FillQuantity
+                );
             }
 
             // Remove from tracking if filled or cancelled
@@ -1285,6 +1397,97 @@ namespace QuantConnect.Brokerages.IG
             Log.Warning("IGBrokerage.HandleStreamingDisconnect(): Disconnected from Lightstreamer");
             _isConnected = false;
             OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Disconnect, -1, "Disconnected from streaming"));
+        }
+
+        /// <summary>
+        /// Monitors streaming connection and automatically reconnects if disconnected
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token to stop monitoring</param>
+        private async Task MonitorOrderConnection(CancellationToken cancellationToken)
+        {
+            var reconnectDelay = TimeSpan.FromSeconds(5);
+            const int maxReconnectDelay = 60; // seconds
+
+            Log.Trace("IGBrokerage.MonitorOrderConnection(): Starting connection monitoring...");
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    // Wait before checking again
+                    await Task.Delay(reconnectDelay, cancellationToken);
+
+                    // Check if streaming client is disconnected while main brokerage thinks it's connected
+                    if (_streamingClient != null && !_streamingClient.IsConnected && _isConnected)
+                    {
+                        Log.Trace("IGBrokerage.MonitorOrderConnection(): Streaming disconnected, attempting reconnection...");
+
+                        try
+                        {
+                            // Reconnect streaming client
+                            _streamingClient.Connect(
+                                _lightstreamerEndpoint,
+                                _cst,
+                                _securityToken,
+                                _accountId
+                            );
+
+                            // Resubscribe to order updates
+                            _streamingClient.SubscribeToOrders();
+
+                            // Resubscribe to all market data
+                            var symbolCount = 0;
+                            foreach (var kvp in _subscribedEpics)
+                            {
+                                try
+                                {
+                                    _streamingClient.SubscribeToMarketData(kvp.Value);
+                                    symbolCount++;
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log.Error($"IGBrokerage.MonitorOrderConnection(): Failed to resubscribe {kvp.Key}: {ex.Message}");
+                                }
+                            }
+
+                            Log.Trace($"IGBrokerage.MonitorOrderConnection(): Reconnection successful. Resubscribed to {symbolCount} symbols");
+
+                            // Reset delay on success
+                            reconnectDelay = TimeSpan.FromSeconds(5);
+
+                            // Notify of reconnection
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Reconnect, -1,
+                                $"Reconnected to streaming. Resubscribed to {symbolCount} symbols"));
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error($"IGBrokerage.MonitorOrderConnection(): Reconnection failed: {ex.Message}");
+
+                            // Exponential backoff
+                            reconnectDelay = TimeSpan.FromSeconds(
+                                Math.Min(reconnectDelay.TotalSeconds * 2, maxReconnectDelay)
+                            );
+
+                            Log.Trace($"IGBrokerage.MonitorOrderConnection(): Next reconnection attempt in {reconnectDelay.TotalSeconds}s");
+
+                            // Notify of failed reconnection
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, -1,
+                                $"Reconnection failed: {ex.Message}. Retrying in {reconnectDelay.TotalSeconds}s"));
+                        }
+                    }
+                }
+                catch (TaskCanceledException)
+                {
+                    // Expected on shutdown
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"IGBrokerage.MonitorOrderConnection(): Monitoring error: {ex.Message}");
+                }
+            }
+
+            Log.Trace("IGBrokerage.MonitorOrderConnection(): Monitoring stopped");
         }
 
         /// <summary>

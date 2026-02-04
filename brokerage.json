@@ -1,0 +1,152 @@
+{
+  "name": "IGBrokerage",
+  "type": "QuantConnect.Brokerages.IG.IGBrokerage",
+  "display-name": "IG Markets",
+  "description": "IG Markets is a leading global CFD and spread betting provider with access to forex, indices, commodities, cryptocurrencies, and equities.",
+  "website": "https://www.ig.com/",
+  "documentation": "https://labs.ig.com/",
+
+  "supported-security-types": [
+    "Forex",
+    "Index",
+    "Cfd",
+    "Crypto",
+    "Equity"
+  ],
+
+  "supported-order-types": [
+    "Market",
+    "Limit",
+    "StopMarket",
+    "StopLimit"
+  ],
+
+  "supported-resolutions": [
+    "Minute",
+    "Hour",
+    "Daily"
+  ],
+
+  "supported-markets": [
+    "IG"
+  ],
+
+  "capabilities": {
+    "data-queue-handler": true,
+    "history-provider": true,
+    "live-trading": true,
+    "paper-trading": true,
+    "brokerage-model": true
+  },
+
+  "authentication": {
+    "type": "api-key",
+    "description": "IG Markets uses API key authentication with CST and X-SECURITY-TOKEN session tokens",
+    "fields": [
+      {
+        "name": "ig-api-url",
+        "type": "text",
+        "label": "API URL",
+        "default": "https://demo-api.ig.com/gateway/deal",
+        "help": "Use https://demo-api.ig.com/gateway/deal for demo, https://api.ig.com/gateway/deal for live",
+        "required": true
+      },
+      {
+        "name": "ig-api-key",
+        "type": "text",
+        "label": "API Key",
+        "help": "Get your API key from https://labs.ig.com/",
+        "required": true
+      },
+      {
+        "name": "ig-identifier",
+        "type": "text",
+        "label": "Username",
+        "help": "Your IG Markets account username/identifier",
+        "required": true
+      },
+      {
+        "name": "ig-password",
+        "type": "password",
+        "label": "Password",
+        "help": "Your IG Markets account password",
+        "required": true
+      },
+      {
+        "name": "ig-account-id",
+        "type": "text",
+        "label": "Account ID",
+        "help": "Optional: Specify account ID for multi-account users",
+        "required": false
+      },
+      {
+        "name": "ig-environment",
+        "type": "select",
+        "label": "Environment",
+        "options": ["demo", "live"],
+        "default": "demo",
+        "help": "Choose demo for testing or live for real trading",
+        "required": true
+      }
+    ]
+  },
+
+  "features": {
+    "streaming": {
+      "technology": "Lightstreamer",
+      "description": "Real-time data via Lightstreamer WebSocket protocol",
+      "supports-quotes": true,
+      "supports-trades": true,
+      "supports-order-updates": true,
+      "supports-account-updates": true
+    },
+    "trading": {
+      "supports-updates": true,
+      "supports-cancellation": true,
+      "supports-stop-loss": true,
+      "supports-take-profit": true,
+      "supports-guaranteed-stops": false,
+      "supports-trailing-stops": false,
+      "order-tag-format": "SL:price;TP:price for stop-loss and take-profit"
+    },
+    "data": {
+      "supports-ticks": false,
+      "supports-quotes": true,
+      "supports-trades": true,
+      "historical-data": true,
+      "fundamental-data": false
+    }
+  },
+
+  "rate-limits": {
+    "trading": {
+      "limit": 40,
+      "period": "minute",
+      "description": "40 trading requests per minute"
+    },
+    "non-trading": {
+      "limit": 60,
+      "period": "minute",
+      "description": "60 non-trading requests (quotes, history, account) per minute"
+    }
+  },
+
+  "limitations": {
+    "tick-data": "Tick resolution not supported, minimum resolution is Minute",
+    "guaranteed-stops": "Guaranteed stops require additional configuration in IG platform",
+    "options": "Option chains not implemented in current version",
+    "futures": "Futures not currently supported"
+  },
+
+  "notes": [
+    "IG Markets uses EPIC codes for instrument identification",
+    "Stop-loss and take-profit orders are specified via order tags (e.g., 'SL:1.1000;TP:1.2000')",
+    "Forex orders are commission-free (spread-based pricing)",
+    "CFD/Index/Equity orders have 0.1% commission (minimum £10 GBP)",
+    "Demo accounts are available for testing at https://www.ig.com/uk/demo-account",
+    "API key must be obtained from https://labs.ig.com/ before use"
+  ],
+
+  "version": "1.0.0",
+  "lean-version": "2.5+"
+}
