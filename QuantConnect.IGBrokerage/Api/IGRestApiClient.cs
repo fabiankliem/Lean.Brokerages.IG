@@ -24,12 +24,27 @@ namespace QuantConnect.Brokerages.IG.Api
 
         public IGRestApiClient(string baseUrl, string apiKey)
         {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                throw new ArgumentException("API URL must not be null or empty", nameof(baseUrl));
+            }
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new ArgumentException("API key must not be null or empty", nameof(apiKey));
+            }
+
             _baseUrl = baseUrl;
             _apiKey = apiKey;
 
-            _httpClient = new HttpClient();
+            var handler = new HttpClientHandler
+            {
+                UseCookies = true,
+                CookieContainer = new System.Net.CookieContainer()
+            };
+            _httpClient = new HttpClient(handler);
             _httpClient.DefaultRequestHeaders.Add("X-IG-API-KEY", apiKey);
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json; charset=UTF-8");
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "QuantConnect/LEAN");
         }
 
         /// <summary>
@@ -173,7 +188,8 @@ namespace QuantConnect.Brokerages.IG.Api
         /// </summary>
         public List<IGWorkingOrder> GetWorkingOrders()
         {
-            var response = SendRequest(HttpMethod.Get, IGApiEndpoints.WorkingOrders);
+            var response = SendRequest(HttpMethod.Get, IGApiEndpoints.WorkingOrders, allowNotFound: true);
+            if (response == null) return new List<IGWorkingOrder>();
             var body = GetResponseBody(response);
             var json = JObject.Parse(body);
 
@@ -245,9 +261,29 @@ namespace QuantConnect.Brokerages.IG.Api
             };
         }
 
+        /// <summary>
+        /// Gets the deal confirmation for a deal reference
+        /// </summary>
+        public JObject GetDealConfirmation(string dealReference)
+        {
+            var response = SendRequest(HttpMethod.Get, $"{IGApiEndpoints.Confirms}/{dealReference}");
+            var body = GetResponseBody(response);
+            return JObject.Parse(body);
+        }
+
         #endregion
 
         #region Markets
+
+        /// <summary>
+        /// Gets market details for a specific EPIC
+        /// </summary>
+        public JObject GetMarketDetails(string epic)
+        {
+            var response = SendRequest(HttpMethod.Get, $"{IGApiEndpoints.Markets}/{epic}", version: 3);
+            var body = GetResponseBody(response);
+            return JObject.Parse(body);
+        }
 
         /// <summary>
         /// Searches for markets
@@ -316,7 +352,7 @@ namespace QuantConnect.Brokerages.IG.Api
         #region HTTP Helpers
 
         private HttpResponseMessage SendRequest(HttpMethod method, string endpoint,
-            object body = null, int version = 1)
+            object body = null, int version = 1, bool allowNotFound = false)
         {
             var request = new HttpRequestMessage(method, _baseUrl + endpoint);
 
@@ -344,6 +380,10 @@ namespace QuantConnect.Brokerages.IG.Api
 
             if (!response.IsSuccessStatusCode)
             {
+                if (allowNotFound && response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    return null;
+                }
                 var errorBody = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 throw new Exception($"IG API Error: {response.StatusCode} - {errorBody}");
             }

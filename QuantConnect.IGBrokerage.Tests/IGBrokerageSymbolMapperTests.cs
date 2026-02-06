@@ -93,17 +93,20 @@ namespace QuantConnect.Brokerages.IG.Tests
         }
 
         [Test]
-        public void ReturnsNull_ForUnknownEpic()
+        public void ReturnsConstructedSymbol_ForUnknownEpic()
         {
+            // GetLeanSymbol best-effort parses unknown EPICs into symbols
             var leanSymbol = _symbolMapper.GetLeanSymbol("UNKNOWN.EPIC.CODE", SecurityType.Forex, Market.IG);
 
-            Assert.IsNull(leanSymbol);
+            Assert.IsNotNull(leanSymbol);
+            Assert.AreEqual("EPIC", leanSymbol.Value);
         }
 
         [Test]
         public void ReturnsNull_ForUnknownSymbol()
         {
-            var symbol = Symbol.Create("UNKNOWNSYMBOL", SecurityType.Forex, Market.IG);
+            // Forex constructs EPICs for unknown symbols; Index returns null
+            var symbol = Symbol.Create("UNKNOWNSYMBOL", SecurityType.Index, Market.IG);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.IsNull(brokerageSymbol);
@@ -125,7 +128,8 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void RoundTrip_Index()
         {
             // Test that converting LEAN -> EPIC -> LEAN gives us the same symbol
-            var originalSymbol = Symbol.Create("SPX500", SecurityType.Index, Market.IG);
+            // Use primary symbol "SPX" (not alias "SPX500") since reverse map returns primary name
+            var originalSymbol = Symbol.Create("SPX", SecurityType.Index, Market.IG);
             var epic = _symbolMapper.GetBrokerageSymbol(originalSymbol);
             var roundTripSymbol = _symbolMapper.GetLeanSymbol(epic, SecurityType.Index, Market.IG);
 

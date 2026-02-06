@@ -377,25 +377,26 @@ namespace QuantConnect.Brokerages.IG
         {
             EpicToSymbolMap = new Dictionary<string, (string, SecurityType)>(StringComparer.OrdinalIgnoreCase);
 
+            // Use TryAdd so the first (primary) mapping wins over aliases
             foreach (var kvp in ForexEpicMap)
             {
-                EpicToSymbolMap[kvp.Value] = (kvp.Key, SecurityType.Forex);
+                EpicToSymbolMap.TryAdd(kvp.Value, (kvp.Key, SecurityType.Forex));
             }
             foreach (var kvp in IndexEpicMap)
             {
-                EpicToSymbolMap[kvp.Value] = (kvp.Key, SecurityType.Index);
+                EpicToSymbolMap.TryAdd(kvp.Value, (kvp.Key, SecurityType.Index));
             }
             foreach (var kvp in CryptoEpicMap)
             {
-                EpicToSymbolMap[kvp.Value] = (kvp.Key, SecurityType.Crypto);
+                EpicToSymbolMap.TryAdd(kvp.Value, (kvp.Key, SecurityType.Crypto));
             }
             foreach (var kvp in CommodityEpicMap)
             {
-                EpicToSymbolMap[kvp.Value] = (kvp.Key, SecurityType.Cfd);
+                EpicToSymbolMap.TryAdd(kvp.Value, (kvp.Key, SecurityType.Cfd));
             }
             foreach (var kvp in EquityEpicMap)
             {
-                EpicToSymbolMap[kvp.Value] = (kvp.Key, SecurityType.Equity);
+                EpicToSymbolMap.TryAdd(kvp.Value, (kvp.Key, SecurityType.Equity));
             }
         }
 

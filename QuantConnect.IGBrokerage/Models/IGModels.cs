@@ -1,31 +1,66 @@
+using Newtonsoft.Json;
 using System;
 
 namespace QuantConnect.Brokerages.IG.Models
 {
-    // Request Models
+    // Request Models - IG API expects camelCase JSON property names
     public class IGPlaceOrderRequest
     {
+        [JsonProperty("epic")]
         public string Epic { get; set; }
+
+        [JsonProperty("direction")]
         public string Direction { get; set; }
+
+        [JsonProperty("size")]
         public decimal Size { get; set; }
+
+        [JsonProperty("orderType")]
         public string OrderType { get; set; }
+
+        [JsonProperty("level")]
         public decimal? Level { get; set; }
+
+        [JsonProperty("limitDistance")]
         public decimal? LimitDistance { get; set; }
+
+        [JsonProperty("stopDistance")]
         public decimal? StopDistance { get; set; }
+
+        [JsonProperty("timeInForce")]
         public string TimeInForce { get; set; }
+
+        [JsonProperty("goodTillDate")]
         public string GoodTillDate { get; set; }
+
+        [JsonProperty("currencyCode")]
         public string CurrencyCode { get; set; }
+
+        [JsonProperty("expiry")]
         public string Expiry { get; set; }
+
+        [JsonProperty("guaranteedStop")]
         public bool GuaranteedStop { get; set; }
+
+        [JsonProperty("forceOpen")]
         public bool ForceOpen { get; set; }
     }
 
     public class IGUpdateOrderRequest
     {
+        [JsonIgnore]
         public string DealId { get; set; }
+
+        [JsonProperty("level")]
         public decimal? Level { get; set; }
+
+        [JsonProperty("limitDistance")]
         public decimal? LimitDistance { get; set; }
+
+        [JsonProperty("stopDistance")]
         public decimal? StopDistance { get; set; }
+
+        [JsonProperty("goodTillDate")]
         public string GoodTillDate { get; set; }
     }
 

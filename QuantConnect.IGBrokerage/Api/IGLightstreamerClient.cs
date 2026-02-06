@@ -1,4 +1,4 @@
-using Lightstreamer.DotNet.Client;
+using com.lightstreamer.client;
 using Newtonsoft.Json.Linq;
 using QuantConnect.Logging;
 using System;
@@ -16,9 +16,14 @@ namespace QuantConnect.Brokerages.IG.Api
         private readonly string _securityToken;
         private readonly string _accountId;
 
-        private LSClient _client;
+        private LightstreamerClient _client;
         private readonly object _lock = new object();
         private volatile bool _isConnected;
+
+        /// <summary>
+        /// Whether the streaming client is currently connected
+        /// </summary>
+        public bool IsConnected => _isConnected;
 
         // Event handlers
         public event EventHandler<IGPriceUpdateEventArgs> OnPriceUpdate;
@@ -28,9 +33,9 @@ namespace QuantConnect.Brokerages.IG.Api
         public event EventHandler OnDisconnect;
 
         // Subscription tracking
-        private readonly Dictionary<string, SubscribedTableKey> _priceSubscriptions;
-        private SubscribedTableKey _tradeSubscription;
-        private SubscribedTableKey _accountSubscription;
+        private readonly Dictionary<string, Subscription> _priceSubscriptions;
+        private Subscription _tradeSubscription;
+        private Subscription _accountSubscription;
 
         public IGLightstreamerClient(string endpoint, string cst, string securityToken, string accountId)
         {
@@ -39,7 +44,7 @@ namespace QuantConnect.Brokerages.IG.Api
             _securityToken = securityToken;
             _accountId = accountId;
 
-            _priceSubscriptions = new Dictionary<string, SubscribedTableKey>();
+            _priceSubscriptions = new Dictionary<string, Subscription>();
         }
 
         /// <summary>
@@ -56,17 +61,18 @@ namespace QuantConnect.Brokerages.IG.Api
                 {
                     Log.Trace($"IGLightstreamerClient.Connect(): Connecting to {_endpoint}");
 
-                    _client = new LSClient();
+                    _client = new LightstreamerClient(_endpoint, "DEFAULT");
+                    _client.connectionDetails.User = _accountId;
+                    _client.connectionDetails.Password = $"CST-{_cst}|XST-{_securityToken}";
 
-                    var connectionInfo = new ConnectionInfo
-                    {
-                        PushServerUrl = _endpoint,
-                        Adapter = "DEFAULT",
-                        User = _accountId,
-                        Password = $"CST-{_cst}|XST-{_securityToken}"
-                    };
+                    // Force HTTP polling transport for maximum compatibility
+                    _client.connectionOptions.ForcedTransport = "HTTP-POLLING";
+                    _client.connectionOptions.PollingInterval = 2000;
 
-                    _client.OpenConnection(connectionInfo, new IGConnectionListener(this));
+                    Log.Trace($"IGLightstreamerClient.Connect(): User={_accountId}, Endpoint={_endpoint}");
+
+                    _client.addListener(new IGConnectionListener(this));
+                    _client.connect();
                     _isConnected = true;
 
                     Log.Trace("IGLightstreamerClient.Connect(): Connected successfully");
@@ -94,23 +100,23 @@ namespace QuantConnect.Brokerages.IG.Api
                     // Unsubscribe from all
                     foreach (var sub in _priceSubscriptions.Values)
                     {
-                        try { _client.UnsubscribeTable(sub); } catch { }
+                        try { _client.unsubscribe(sub); } catch { }
                     }
                     _priceSubscriptions.Clear();
 
                     if (_tradeSubscription != null)
                     {
-                        try { _client.UnsubscribeTable(_tradeSubscription); } catch { }
+                        try { _client.unsubscribe(_tradeSubscription); } catch { }
                         _tradeSubscription = null;
                     }
 
                     if (_accountSubscription != null)
                     {
-                        try { _client.UnsubscribeTable(_accountSubscription); } catch { }
+                        try { _client.unsubscribe(_accountSubscription); } catch { }
                         _accountSubscription = null;
                     }
 
-                    _client.CloseConnection();
+                    _client.disconnect();
                     _isConnected = false;
 
                     Log.Trace("IGLightstreamerClient.Disconnect(): Disconnected");
@@ -132,17 +138,18 @@ namespace QuantConnect.Brokerages.IG.Api
 
             try
             {
-                var tableInfo = new ExtendedTableInfo(
-                    new[] { $"MARKET:{epic}" },
+                var subscription = new Subscription(
                     "MERGE",
+                    new[] { $"MARKET:{epic}" },
                     new[] { "BID", "OFFER", "HIGH", "LOW", "MID_OPEN", "CHANGE", "CHANGE_PCT",
-                            "UPDATE_TIME", "MARKET_STATE", "MARKET_DELAY" },
-                    true
+                            "UPDATE_TIME", "MARKET_STATE", "MARKET_DELAY" }
                 );
+                subscription.RequestedSnapshot = "yes";
 
                 var listener = new IGPriceListener(epic, this);
-                var tableKey = _client.SubscribeTable(tableInfo, listener, false);
-                _priceSubscriptions[epic] = tableKey;
+                subscription.addListener(listener);
+                _client.subscribe(subscription);
+                _priceSubscriptions[epic] = subscription;
 
                 Log.Trace($"IGLightstreamerClient.SubscribeToPrices(): Subscribed to {epic}");
             }
@@ -157,11 +164,11 @@ namespace QuantConnect.Brokerages.IG.Api
         /// </summary>
         public void UnsubscribeFromPrices(string epic)
         {
-            if (_priceSubscriptions.TryGetValue(epic, out var tableKey))
+            if (_priceSubscriptions.TryGetValue(epic, out var subscription))
             {
                 try
                 {
-                    _client.UnsubscribeTable(tableKey);
+                    _client.unsubscribe(subscription);
                     _priceSubscriptions.Remove(epic);
                     Log.Trace($"IGLightstreamerClient.UnsubscribeFromPrices(): Unsubscribed from {epic}");
                 }
@@ -182,15 +189,17 @@ namespace QuantConnect.Brokerages.IG.Api
 
             try
             {
-                var tableInfo = new ExtendedTableInfo(
-                    new[] { $"TRADE:{_accountId}" },
+                var subscription = new Subscription(
                     "DISTINCT",
-                    new[] { "CONFIRMS", "OPU", "WOU" },
-                    true
+                    new[] { $"TRADE:{_accountId}" },
+                    new[] { "CONFIRMS", "OPU", "WOU" }
                 );
+                subscription.RequestedSnapshot = "yes";
 
                 var listener = new IGTradeListener(this);
-                _tradeSubscription = _client.SubscribeTable(tableInfo, listener, false);
+                subscription.addListener(listener);
+                _client.subscribe(subscription);
+                _tradeSubscription = subscription;
 
                 Log.Trace("IGLightstreamerClient.SubscribeToTradeUpdates(): Subscribed");
             }
@@ -210,16 +219,18 @@ namespace QuantConnect.Brokerages.IG.Api
 
             try
             {
-                var tableInfo = new ExtendedTableInfo(
-                    new[] { $"ACCOUNT:{_accountId}" },
+                var subscription = new Subscription(
                     "MERGE",
+                    new[] { $"ACCOUNT:{_accountId}" },
                     new[] { "PNL", "DEPOSIT", "AVAILABLE_CASH", "FUNDS", "MARGIN", "MARGIN_LR",
-                            "MARGIN_NLR", "AVAILABLE_TO_DEAL", "EQUITY" },
-                    true
+                            "MARGIN_NLR", "AVAILABLE_TO_DEAL", "EQUITY" }
                 );
+                subscription.RequestedSnapshot = "yes";
 
                 var listener = new IGAccountListener(this);
-                _accountSubscription = _client.SubscribeTable(tableInfo, listener, false);
+                subscription.addListener(listener);
+                _client.subscribe(subscription);
+                _accountSubscription = subscription;
 
                 Log.Trace("IGLightstreamerClient.SubscribeToAccountUpdates(): Subscribed");
             }
@@ -287,6 +298,11 @@ namespace QuantConnect.Brokerages.IG.Api
             OnDisconnect?.Invoke(this, EventArgs.Empty);
         }
 
+        internal void SetConnected(bool connected)
+        {
+            _isConnected = connected;
+        }
+
         #endregion
 
         public void Dispose()
@@ -297,7 +313,7 @@ namespace QuantConnect.Brokerages.IG.Api
 
     #region Lightstreamer Listeners
 
-    internal class IGConnectionListener : IConnectionListener
+    internal class IGConnectionListener : ClientListener
     {
         private readonly IGLightstreamerClient _client;
 
@@ -306,33 +322,42 @@ namespace QuantConnect.Brokerages.IG.Api
             _client = client;
         }
 
-        public void OnConnectionEstablished() =>
-            Log.Trace("IGLightstreamer: Connection established");
+        public void onListenEnd() { }
 
-        public void OnSessionStarted(bool isPolling, string controlLink) =>
-            Log.Trace($"IGLightstreamer: Session started, polling={isPolling}");
+        public void onListenStart() { }
 
-        public void OnNewBytes(long bytes) { }
+        public void onServerError(int errorCode, string errorMessage)
+        {
+            Log.Error($"IGLightstreamer: Server error {errorCode}: {errorMessage}");
+            _client.RaiseError(errorCode, errorMessage);
+        }
 
-        public void OnDataError(PushServerException e) =>
-            _client.RaiseError(-1, $"Data error: {e.Message}");
+        public void onStatusChange(string status)
+        {
+            Log.Trace($"IGLightstreamer: Status changed to {status}");
 
-        public void OnActivityWarning(bool warningOn) =>
-            Log.Trace($"IGLightstreamer: Activity warning={warningOn}");
+            if (status.StartsWith("CONNECTED:"))
+            {
+                Log.Trace($"IGLightstreamer: Successfully connected via {status}");
+                _client.SetConnected(true);
+            }
+            else if (status == "DISCONNECTED")
+            {
+                _client.RaiseDisconnect();
+            }
+            else if (status.Contains("WILL-RETRY"))
+            {
+                Log.Trace("IGLightstreamer: Connection attempt failed, will retry...");
+            }
+        }
 
-        public void OnClose() => _client.RaiseDisconnect();
-
-        public void OnEnd(int cause) =>
-            Log.Trace($"IGLightstreamer: Connection ended, cause={cause}");
-
-        public void OnFailure(PushServerException e) =>
-            _client.RaiseError(-1, $"Connection failure: {e.Message}");
-
-        public void OnFailure(PushConnException e) =>
-            _client.RaiseError(-1, $"Connection failure: {e.Message}");
+        public void onPropertyChange(string property)
+        {
+            Log.Trace($"IGLightstreamer: Property changed: {property}");
+        }
     }
 
-    internal class IGPriceListener : IHandyTableListener
+    internal class IGPriceListener : SubscriptionListener
     {
         private readonly string _epic;
         private readonly IGLightstreamerClient _client;
@@ -343,37 +368,46 @@ namespace QuantConnect.Brokerages.IG.Api
             _client = client;
         }
 
-        public void OnUpdate(int itemPos, string itemName, IUpdateInfo update)
+        public void onItemUpdate(ItemUpdate update)
         {
             try
             {
-                var bid = ParseDecimal(update.GetNewValue("BID"));
-                var ask = ParseDecimal(update.GetNewValue("OFFER"));
+                var bid = ParseDecimal(update.getValue("BID"));
+                var ask = ParseDecimal(update.getValue("OFFER"));
 
                 _client.RaisePriceUpdate(_epic, bid, ask, null, null, null, null);
             }
             catch (Exception ex)
             {
-                Log.Error($"IGPriceListener.OnUpdate: Error: {ex.Message}");
+                Log.Error($"IGPriceListener.onItemUpdate: Error: {ex.Message}");
             }
         }
 
-        public void OnRawUpdatesLost(int itemPos, string itemName, int lostUpdates) =>
-            Log.Warning($"IGPriceListener: Lost {lostUpdates} updates for {itemName}");
+        public void onItemLostUpdates(string itemName, int itemPos, int lostUpdates) =>
+            Log.Trace($"IGPriceListener: Lost {lostUpdates} updates for {itemName}");
 
-        public void OnSnapshotEnd(int itemPos, string itemName) { }
-        public void OnUnsubscr(int itemPos, string itemName) { }
-        public void OnUnsubscrAll() { }
+        public void onSubscription() { }
+        public void onUnsubscription() { }
+        public void onClearSnapshot(string itemName, int itemPos) { }
+        public void onCommandSecondLevelItemLostUpdates(int lostUpdates, string key) { }
+        public void onCommandSecondLevelSubscriptionError(int code, string message, string key) { }
+        public void onEndOfSnapshot(string itemName, int itemPos) { }
+        public void onListenEnd() { }
+        public void onListenStart() { }
+        public void onSubscriptionError(int code, string message) =>
+            Log.Error($"IGPriceListener: Subscription error {code}: {message}");
+        public void onRealMaxFrequency(string frequency) { }
 
         private decimal? ParseDecimal(string value)
         {
             if (string.IsNullOrEmpty(value) || value == "null")
                 return null;
-            return decimal.TryParse(value, out var result) ? result : (decimal?)null;
+            return decimal.TryParse(value, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var result) ? result : (decimal?)null;
         }
     }
 
-    internal class IGTradeListener : IHandyTableListener
+    internal class IGTradeListener : SubscriptionListener
     {
         private readonly IGLightstreamerClient _client;
 
@@ -382,12 +416,12 @@ namespace QuantConnect.Brokerages.IG.Api
             _client = client;
         }
 
-        public void OnUpdate(int itemPos, string itemName, IUpdateInfo update)
+        public void onItemUpdate(ItemUpdate update)
         {
             try
             {
                 // Parse trade confirmation JSON
-                var confirms = update.GetNewValue("CONFIRMS");
+                var confirms = update.getValue("CONFIRMS");
                 if (!string.IsNullOrEmpty(confirms) && confirms != "null")
                 {
                     // Parse and raise trade update
@@ -403,17 +437,25 @@ namespace QuantConnect.Brokerages.IG.Api
             }
             catch (Exception ex)
             {
-                Log.Error($"IGTradeListener.OnUpdate: Error: {ex.Message}");
+                Log.Error($"IGTradeListener.onItemUpdate: Error: {ex.Message}");
             }
         }
 
-        public void OnRawUpdatesLost(int itemPos, string itemName, int lostUpdates) { }
-        public void OnSnapshotEnd(int itemPos, string itemName) { }
-        public void OnUnsubscr(int itemPos, string itemName) { }
-        public void OnUnsubscrAll() { }
+        public void onItemLostUpdates(string itemName, int itemPos, int lostUpdates) { }
+        public void onSubscription() { }
+        public void onUnsubscription() { }
+        public void onClearSnapshot(string itemName, int itemPos) { }
+        public void onCommandSecondLevelItemLostUpdates(int lostUpdates, string key) { }
+        public void onCommandSecondLevelSubscriptionError(int code, string message, string key) { }
+        public void onEndOfSnapshot(string itemName, int itemPos) { }
+        public void onListenEnd() { }
+        public void onListenStart() { }
+        public void onSubscriptionError(int code, string message) =>
+            Log.Error($"IGTradeListener: Subscription error {code}: {message}");
+        public void onRealMaxFrequency(string frequency) { }
     }
 
-    internal class IGAccountListener : IHandyTableListener
+    internal class IGAccountListener : SubscriptionListener
     {
         private readonly IGLightstreamerClient _client;
 
@@ -422,33 +464,42 @@ namespace QuantConnect.Brokerages.IG.Api
             _client = client;
         }
 
-        public void OnUpdate(int itemPos, string itemName, IUpdateInfo update)
+        public void onItemUpdate(ItemUpdate update)
         {
             try
             {
-                var balance = ParseDecimal(update.GetNewValue("FUNDS")) ?? 0;
-                var margin = ParseDecimal(update.GetNewValue("MARGIN")) ?? 0;
-                var available = ParseDecimal(update.GetNewValue("AVAILABLE_CASH")) ?? 0;
-                var pnl = ParseDecimal(update.GetNewValue("PNL")) ?? 0;
+                var balance = ParseDecimal(update.getValue("FUNDS")) ?? 0;
+                var margin = ParseDecimal(update.getValue("MARGIN")) ?? 0;
+                var available = ParseDecimal(update.getValue("AVAILABLE_CASH")) ?? 0;
+                var pnl = ParseDecimal(update.getValue("PNL")) ?? 0;
 
                 _client.RaiseAccountUpdate("USD", balance, margin, available, pnl);
             }
             catch (Exception ex)
             {
-                Log.Error($"IGAccountListener.OnUpdate: Error: {ex.Message}");
+                Log.Error($"IGAccountListener.onItemUpdate: Error: {ex.Message}");
             }
         }
 
-        public void OnRawUpdatesLost(int itemPos, string itemName, int lostUpdates) { }
-        public void OnSnapshotEnd(int itemPos, string itemName) { }
-        public void OnUnsubscr(int itemPos, string itemName) { }
-        public void OnUnsubscrAll() { }
+        public void onItemLostUpdates(string itemName, int itemPos, int lostUpdates) { }
+        public void onSubscription() { }
+        public void onUnsubscription() { }
+        public void onClearSnapshot(string itemName, int itemPos) { }
+        public void onCommandSecondLevelItemLostUpdates(int lostUpdates, string key) { }
+        public void onCommandSecondLevelSubscriptionError(int code, string message, string key) { }
+        public void onEndOfSnapshot(string itemName, int itemPos) { }
+        public void onListenEnd() { }
+        public void onListenStart() { }
+        public void onSubscriptionError(int code, string message) =>
+            Log.Error($"IGAccountListener: Subscription error {code}: {message}");
+        public void onRealMaxFrequency(string frequency) { }
 
         private decimal? ParseDecimal(string value)
         {
             if (string.IsNullOrEmpty(value) || value == "null")
                 return null;
-            return decimal.TryParse(value, out var result) ? result : (decimal?)null;
+            return decimal.TryParse(value, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var result) ? result : (decimal?)null;
         }
     }
 

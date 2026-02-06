@@ -13,15 +13,21 @@
  * limitations under the License.
 */
 
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using QuantConnect.Brokerages.IG.Api;
 using QuantConnect.Brokerages.IG.Models;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
+using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
+using QuantConnect.Orders.Fees;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
@@ -44,7 +50,7 @@ namespace QuantConnect.Brokerages.IG
         private readonly string _apiKey;
         private readonly string _accountId;
         private readonly IAlgorithm _algorithm;
-        private readonly IDataAggregator _aggregator;
+        private IDataAggregator _aggregator;
 
         // API Clients
         private IGRestApiClient _restClient;
@@ -80,6 +86,13 @@ namespace QuantConnect.Brokerages.IG
         // ReSubscription infrastructure for automatic reconnection
         private CancellationTokenSource _cancellationTokenSource;
         private Task _reconnectionMonitorTask;
+        private Task _restPollingTask;
+
+        // IG instrument conversion cache: maps EPIC -> (PipValue, ContractSize)
+        // IG returns forex prices in "points" (e.g., EURUSD 11792.2 = 1.17922 exchange rate)
+        // PipValue converts IG points to standard price: standard = igPrice * pipValue
+        // ContractSize converts LEAN quantity to IG contracts: igSize = leanQty / contractSize
+        private readonly ConcurrentDictionary<string, (decimal PipValue, decimal ContractSize)> _instrumentConversion;
 
         // Supported security types for validation
         private static readonly HashSet<SecurityType> _supportedSecurityTypes = new HashSet<SecurityType>
@@ -142,6 +155,7 @@ namespace QuantConnect.Brokerages.IG
             _ordersByBrokerId = new ConcurrentDictionary<string, Order>();
             _brokerIdByOrderId = new ConcurrentDictionary<int, string>();
             _subscribedEpics = new ConcurrentDictionary<Symbol, string>();
+            _instrumentConversion = new ConcurrentDictionary<string, (decimal PipValue, decimal ContractSize)>();
 
             // Rate limiting - IG limits: ~40 trading requests/min, ~60 non-trading/min
             _tradingRateGate = new RateGate(40, TimeSpan.FromMinutes(1));
@@ -221,15 +235,19 @@ namespace QuantConnect.Brokerages.IG
         {
             _nonTradingRateGate.WaitToProceed();
 
-            var endpoint = $"/markets/{epic}";
-            var response = _restClient.Get(endpoint);
+            var response = _restClient.GetMarketDetails(epic);
+            var snapshot = response["snapshot"];
+
+            // Get conversion info for this EPIC
+            var conversion = GetInstrumentConversion(epic);
+            var pv = conversion.PipValue;
 
             return new
             {
-                Bid = (decimal)response.snapshot.bid,
-                Offer = (decimal)response.snapshot.offer,
-                High = (decimal)response.snapshot.high,
-                Low = (decimal)response.snapshot.low
+                Bid = (snapshot["bid"]?.Value<decimal>() ?? 0) * pv,
+                Offer = (snapshot["offer"]?.Value<decimal>() ?? 0) * pv,
+                High = (snapshot["high"]?.Value<decimal>() ?? 0) * pv,
+                Low = (snapshot["low"]?.Value<decimal>() ?? 0) * pv
             };
         }
 
@@ -283,27 +301,35 @@ namespace QuantConnect.Brokerages.IG
                         accountId = loginResponse.AccountId;
                     }
 
-                    // Initialize Lightstreamer client for streaming
-                    _streamingClient = new IGLightstreamerClient(
-                        _lightstreamerEndpoint,
-                        _cst,
-                        _securityToken,
-                        accountId
-                    );
+                    // Initialize Lightstreamer client for streaming (optional - REST polling is the fallback)
+                    try
+                    {
+                        _streamingClient = new IGLightstreamerClient(
+                            _lightstreamerEndpoint,
+                            _cst,
+                            _securityToken,
+                            accountId
+                        );
 
-                    // Wire up event handlers
-                    _streamingClient.OnPriceUpdate += HandlePriceUpdate;
-                    _streamingClient.OnTradeUpdate += HandleTradeUpdate;
-                    _streamingClient.OnAccountUpdate += HandleAccountUpdate;
-                    _streamingClient.OnError += HandleStreamingError;
-                    _streamingClient.OnDisconnect += HandleStreamingDisconnect;
+                        // Wire up event handlers
+                        _streamingClient.OnPriceUpdate += HandlePriceUpdate;
+                        _streamingClient.OnTradeUpdate += HandleTradeUpdate;
+                        _streamingClient.OnAccountUpdate += HandleAccountUpdate;
+                        _streamingClient.OnError += HandleStreamingError;
+                        _streamingClient.OnDisconnect += HandleStreamingDisconnect;
 
-                    // Connect to Lightstreamer
-                    _streamingClient.Connect();
+                        // Connect to Lightstreamer
+                        _streamingClient.Connect();
 
-                    // Subscribe to trade and account updates
-                    _streamingClient.SubscribeToTradeUpdates();
-                    _streamingClient.SubscribeToAccountUpdates();
+                        // Subscribe to trade and account updates
+                        _streamingClient.SubscribeToTradeUpdates();
+                        _streamingClient.SubscribeToAccountUpdates();
+                    }
+                    catch (Exception lsEx)
+                    {
+                        Log.Trace($"IGBrokerage.Connect(): Lightstreamer unavailable ({lsEx.GetType().Name}), using REST polling for market data");
+                        _streamingClient = null;
+                    }
 
                     _isConnected = true;
                     Log.Trace("IGBrokerage.Connect(): Successfully connected to IG Markets");
@@ -315,7 +341,11 @@ namespace QuantConnect.Brokerages.IG
                     _reconnectionMonitorTask = Task.Run(() =>
                         MonitorOrderConnection(_cancellationTokenSource.Token));
 
-                    Log.Trace("IGBrokerage.Connect(): Started connection monitoring");
+                    // Start REST polling fallback for price data (in case Lightstreamer fails)
+                    _restPollingTask = Task.Run(() =>
+                        PollPricesViaRest(_cancellationTokenSource.Token));
+
+                    Log.Trace("IGBrokerage.Connect(): Started connection monitoring and REST price polling");
                 }
                 catch (Exception ex)
                 {
@@ -495,17 +525,25 @@ namespace QuantConnect.Brokerages.IG
                         continue;
                     }
 
+                    // Get conversion info for this EPIC
+                    var conversion = GetInstrumentConversion(wo.Epic);
+
                     var direction = wo.Direction == "BUY" ? OrderDirection.Buy : OrderDirection.Sell;
-                    var quantity = direction == OrderDirection.Buy ? wo.Size : -wo.Size;
+                    // Convert IG contracts to LEAN base currency units
+                    var quantity = direction == OrderDirection.Buy
+                        ? wo.Size * conversion.ContractSize
+                        : -wo.Size * conversion.ContractSize;
+                    // Convert IG points to standard price
+                    var level = ConvertIGPriceToLean(wo.Level, conversion.PipValue);
 
                     Order order;
                     if (wo.OrderType == "LIMIT")
                     {
-                        order = new LimitOrder(symbol, quantity, wo.Level, wo.CreatedDate);
+                        order = new LimitOrder(symbol, quantity, level, wo.CreatedDate);
                     }
                     else if (wo.OrderType == "STOP")
                     {
-                        order = new StopMarketOrder(symbol, quantity, wo.Level, wo.CreatedDate);
+                        order = new StopMarketOrder(symbol, quantity, level, wo.CreatedDate);
                     }
                     else
                     {
@@ -555,19 +593,24 @@ namespace QuantConnect.Brokerages.IG
                         continue;
                     }
 
-                    var quantity = position.Direction == "BUY" ? position.Size : -position.Size;
+                    // Get conversion info for this EPIC
+                    var conversion = GetInstrumentConversion(position.Epic);
+
+                    // Convert IG contracts to LEAN base currency units
+                    var leanQuantity = position.Direction == "BUY"
+                        ? position.Size * conversion.ContractSize
+                        : -position.Size * conversion.ContractSize;
 
                     holdings.Add(new Holding
                     {
                         Symbol = symbol,
-                        Type = symbol.SecurityType,
-                        Quantity = quantity,
-                        AveragePrice = position.OpenLevel,
-                        MarketPrice = position.CurrentLevel,
-                        CurrencySymbol = position.Currency ?? "GBP"
+                        Quantity = leanQuantity,
+                        AveragePrice = ConvertIGPriceToLean(position.OpenLevel, conversion.PipValue),
+                        MarketPrice = ConvertIGPriceToLean(position.CurrentLevel, conversion.PipValue),
+                        CurrencySymbol = position.Currency ?? "USD"
                     });
 
-                    Log.Trace($"IGBrokerage.GetAccountHoldings(): {symbol} - {quantity} @ {position.OpenLevel}");
+                    Log.Trace($"IGBrokerage.GetAccountHoldings(): {symbol} - {leanQuantity} @ {ConvertIGPriceToLean(position.OpenLevel, conversion.PipValue)}");
                 }
 
                 return holdings;
@@ -665,16 +708,24 @@ namespace QuantConnect.Brokerages.IG
                     return false;
                 }
 
+                // Get conversion info for quantity and price conversion
+                var conversion = GetInstrumentConversion(epic);
+
+                // Convert LEAN quantity (base currency units) to IG contracts
+                var igSize = Math.Abs(order.Quantity) / conversion.ContractSize;
+
                 var request = new IGPlaceOrderRequest
                 {
                     Epic = epic,
                     Direction = order.Quantity > 0 ? "BUY" : "SELL",
-                    Size = Math.Abs(order.Quantity),
-                    CurrencyCode = "GBP",
-                    Expiry = "DFB", // Daily funded bet (CFD)
+                    Size = igSize,
+                    CurrencyCode = "USD",
+                    Expiry = "-", // No expiry for CFD
                     ForceOpen = true,
                     GuaranteedStop = false
                 };
+
+                Log.Trace($"IGBrokerage.PlaceOrderInternal(): LEAN qty={order.Quantity}, IG size={igSize} contracts (contractSize={conversion.ContractSize})");
 
                 // Set order type specific parameters
                 decimal? entryPrice = null;
@@ -687,21 +738,22 @@ namespace QuantConnect.Brokerages.IG
                 {
                     var limitOrder = (LimitOrder)order;
                     request.OrderType = "LIMIT";
-                    request.Level = limitOrder.LimitPrice;
+                    // Convert LEAN price to IG points
+                    request.Level = ConvertLeanPriceToIG(limitOrder.LimitPrice, conversion.PipValue);
                     entryPrice = limitOrder.LimitPrice;
                 }
                 else if (order.Type == OrderType.StopMarket)
                 {
                     var stopOrder = (StopMarketOrder)order;
                     request.OrderType = "STOP";
-                    request.Level = stopOrder.StopPrice;
+                    request.Level = ConvertLeanPriceToIG(stopOrder.StopPrice, conversion.PipValue);
                     entryPrice = stopOrder.StopPrice;
                 }
                 else if (order.Type == OrderType.StopLimit)
                 {
                     var stopLimitOrder = (StopLimitOrder)order;
                     request.OrderType = "LIMIT";
-                    request.Level = stopLimitOrder.LimitPrice;
+                    request.Level = ConvertLeanPriceToIG(stopLimitOrder.LimitPrice, conversion.PipValue);
                     entryPrice = stopLimitOrder.LimitPrice;
                 }
                 else
@@ -773,6 +825,10 @@ namespace QuantConnect.Brokerages.IG
                     });
 
                     Log.Trace($"IGBrokerage.PlaceOrderInternal(): Order {order.Id} submitted. DealRef: {response.DealReference}");
+
+                    // Poll for deal confirmation via REST (since Lightstreamer may not be available)
+                    PollDealConfirmation(order, response.DealReference, conversion.PipValue, conversion.ContractSize);
+
                     return true;
                 }
                 else
@@ -950,6 +1006,18 @@ namespace QuantConnect.Brokerages.IG
                 return null;
             }
 
+            // Lazy-initialize aggregator if needed
+            if (_aggregator == null)
+            {
+                _aggregator = Composer.Instance.GetPart<IDataAggregator>()
+                    ?? Composer.Instance.GetExportedValueByTypeName<IDataAggregator>("AggregationManager");
+                if (_aggregator == null)
+                {
+                    Log.Error("IGBrokerage.Subscribe(): Data aggregator is not available");
+                    return null;
+                }
+            }
+
             var enumerator = _aggregator.Add(dataConfig, newDataAvailableHandler);
             _subscriptionManager.Subscribe(dataConfig);
 
@@ -963,7 +1031,7 @@ namespace QuantConnect.Brokerages.IG
         public void Unsubscribe(SubscriptionDataConfig dataConfig)
         {
             _subscriptionManager.Unsubscribe(dataConfig);
-            _aggregator.Remove(dataConfig);
+            _aggregator?.Remove(dataConfig);
         }
 
         /// <summary>
@@ -980,11 +1048,14 @@ namespace QuantConnect.Brokerages.IG
             Log.Trace($"IGBrokerage.SetJob(): Initializing data queue handler for algorithm {job.AlgorithmId}");
             Log.Trace($"IGBrokerage.SetJob(): Deploy ID: {job.DeployId}, Data Provider: {job.DataQueueHandler}");
 
-            // Validate aggregator is available
+            // Lazy-initialize aggregator if not set (e.g., when created via parameterless constructor before Composer is fully ready)
             if (_aggregator == null)
             {
-                throw new InvalidOperationException("IGBrokerage.SetJob(): Data aggregator not initialized. " +
-                    "Ensure brokerage is created with parameterless constructor for IDataQueueHandler usage.");
+                _aggregator = Composer.Instance.GetPart<IDataAggregator>();
+                if (_aggregator == null)
+                {
+                    Log.Trace("IGBrokerage.SetJob(): Data aggregator not available yet, will initialize on first subscription");
+                }
             }
 
             // Log brokerage configuration if present
@@ -1102,6 +1173,77 @@ namespace QuantConnect.Brokerages.IG
         #region Private Methods
 
         /// <summary>
+        /// Fetches and caches the instrument conversion info (pip value and contract size) for an EPIC.
+        /// IG returns forex prices in "points" format (e.g., EURUSD 11792.2 = 1.17922 exchange rate).
+        /// This method fetches the market details to determine the conversion factors.
+        /// </summary>
+        /// <param name="epic">The IG EPIC code</param>
+        /// <returns>Tuple of (PipValue, ContractSize) for price/quantity conversion</returns>
+        internal (decimal PipValue, decimal ContractSize) GetInstrumentConversion(string epic)
+        {
+            if (_instrumentConversion.TryGetValue(epic, out var cached))
+            {
+                return cached;
+            }
+
+            try
+            {
+                _nonTradingRateGate.WaitToProceed();
+                var marketDetails = _restClient.GetMarketDetails(epic);
+                var instrument = marketDetails["instrument"];
+
+                // Parse pipValue from onePipMeans (e.g., "0.0001 USD/EUR")
+                decimal pipValue = 1m;
+                var onePipMeans = instrument?["onePipMeans"]?.ToString();
+                if (!string.IsNullOrEmpty(onePipMeans))
+                {
+                    var parts = onePipMeans.Split(' ');
+                    if (parts.Length > 0 && decimal.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var pv))
+                    {
+                        pipValue = pv;
+                    }
+                }
+
+                // Parse contractSize (e.g., "10000")
+                decimal contractSize = 1m;
+                var contractSizeStr = instrument?["contractSize"]?.ToString();
+                if (!string.IsNullOrEmpty(contractSizeStr) &&
+                    decimal.TryParse(contractSizeStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var cs))
+                {
+                    contractSize = cs;
+                }
+
+                var result = (pipValue, contractSize);
+                _instrumentConversion[epic] = result;
+
+                Log.Trace($"IGBrokerage.GetInstrumentConversion(): {epic} - PipValue={pipValue}, ContractSize={contractSize}");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.GetInstrumentConversion(): Error for {epic}: {ex.Message}");
+                return (1m, 1m); // Default: no conversion
+            }
+        }
+
+        /// <summary>
+        /// Converts an IG points price to a standard LEAN price
+        /// </summary>
+        private decimal ConvertIGPriceToLean(decimal igPrice, decimal pipValue)
+        {
+            return igPrice * pipValue;
+        }
+
+        /// <summary>
+        /// Converts a standard LEAN price to IG points price
+        /// </summary>
+        private decimal ConvertLeanPriceToIG(decimal leanPrice, decimal pipValue)
+        {
+            if (pipValue == 0) return leanPrice;
+            return leanPrice / pipValue;
+        }
+
+        /// <summary>
         /// Determines if we can subscribe to the specified symbol
         /// </summary>
         private bool CanSubscribe(Symbol symbol)
@@ -1188,9 +1330,8 @@ namespace QuantConnect.Brokerages.IG
             foreach (var subscription in subscriptions)
             {
                 var symbol = subscription.Symbol;
-                var config = subscription.Configuration;
 
-                if (!ValidateSubscription(symbol, config.SecurityType, config.Resolution, config.TickType))
+                if (!ValidateSubscription(symbol, subscription.SecurityType, subscription.Resolution, subscription.TickType))
                 {
                     invalidCount++;
                 }
@@ -1218,6 +1359,12 @@ namespace QuantConnect.Brokerages.IG
                 if (!string.IsNullOrEmpty(epic))
                 {
                     _subscribedEpics[symbol] = epic;
+
+                    // Pre-fetch and cache instrument conversion info
+                    if (_restClient != null)
+                    {
+                        GetInstrumentConversion(epic);
+                    }
 
                     // Subscribe to Lightstreamer price updates for this EPIC
                     if (_streamingClient != null)
@@ -1274,13 +1421,21 @@ namespace QuantConnect.Brokerages.IG
                 // Create tick data from price update
                 if (e.Bid.HasValue && e.Ask.HasValue)
                 {
+                    // Get conversion info for this EPIC
+                    _instrumentConversion.TryGetValue(e.Epic, out var conversion);
+                    var pipValue = conversion.PipValue != 0 ? conversion.PipValue : 1m;
+
+                    // Convert IG points to standard prices
+                    var bidPrice = ConvertIGPriceToLean(e.Bid.Value, pipValue);
+                    var askPrice = ConvertIGPriceToLean(e.Ask.Value, pipValue);
+
                     var tick = new Tick
                     {
                         Symbol = symbol,
                         Time = DateTime.UtcNow,
-                        Value = (e.Bid.Value + e.Ask.Value) / 2,
-                        BidPrice = e.Bid.Value,
-                        AskPrice = e.Ask.Value,
+                        Value = (bidPrice + askPrice) / 2,
+                        BidPrice = bidPrice,
+                        AskPrice = askPrice,
                         TickType = TickType.Quote
                     };
 
@@ -1310,7 +1465,7 @@ namespace QuantConnect.Brokerages.IG
             // Find the order by broker ID
             if (!_ordersByBrokerId.TryGetValue(e.DealId, out var order))
             {
-                Log.Warning($"IGBrokerage.ProcessTradeUpdate(): Order not found for DealId {e.DealId}");
+                Log.Trace($"IGBrokerage.ProcessTradeUpdate(): Order not found for DealId {e.DealId}");
                 return;
             }
 
@@ -1324,8 +1479,19 @@ namespace QuantConnect.Brokerages.IG
 
             if (status == OrderStatus.Filled || status == OrderStatus.PartiallyFilled)
             {
-                orderEvent.FillPrice = e.FilledPrice ?? 0;
-                orderEvent.FillQuantity = e.FilledSize ?? 0;
+                // Convert IG fill price/size to LEAN format
+                var epic = _subscribedEpics.Values.FirstOrDefault(); // fallback
+                if (_brokerIdByOrderId.TryGetValue(order.Id, out var ordDealId))
+                {
+                    var mappedEpic = _symbolMapper.GetBrokerageSymbol(order.Symbol);
+                    if (!string.IsNullOrEmpty(mappedEpic)) epic = mappedEpic;
+                }
+                _instrumentConversion.TryGetValue(epic ?? "", out var conv);
+                var fillPipValue = conv.PipValue != 0 ? conv.PipValue : 1m;
+                var fillContractSize = conv.ContractSize != 0 ? conv.ContractSize : 1m;
+
+                orderEvent.FillPrice = (e.FilledPrice ?? 0) * fillPipValue;
+                orderEvent.FillQuantity = (e.FilledSize ?? 0) * fillContractSize;
 
                 // Calculate order fees for filled orders
                 orderEvent.OrderFee = IGOrderFeeCalculator.CalculateFee(
@@ -1394,9 +1560,10 @@ namespace QuantConnect.Brokerages.IG
         /// </summary>
         private void HandleStreamingDisconnect(object sender, EventArgs e)
         {
-            Log.Warning("IGBrokerage.HandleStreamingDisconnect(): Disconnected from Lightstreamer");
+            Log.Error("IGBrokerage.HandleStreamingDisconnect(): Disconnected from Lightstreamer");
             _isConnected = false;
-            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Disconnect, -1, "Disconnected from streaming"));
+            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Disconnect, -1,
+                "Lightstreamer streaming connection lost."));
         }
 
         /// <summary>
@@ -1424,16 +1591,21 @@ namespace QuantConnect.Brokerages.IG
 
                         try
                         {
-                            // Reconnect streaming client
-                            _streamingClient.Connect(
+                            // Create a new streaming client and connect
+                            _streamingClient?.Dispose();
+                            _streamingClient = new IGLightstreamerClient(
                                 _lightstreamerEndpoint,
                                 _cst,
                                 _securityToken,
                                 _accountId
                             );
+                            _streamingClient.OnPriceUpdate += HandlePriceUpdate;
+                            _streamingClient.OnTradeUpdate += HandleTradeUpdate;
+                            _streamingClient.OnDisconnect += HandleStreamingDisconnect;
+                            _streamingClient.Connect();
 
-                            // Resubscribe to order updates
-                            _streamingClient.SubscribeToOrders();
+                            // Resubscribe to trade updates
+                            _streamingClient.SubscribeToTradeUpdates();
 
                             // Resubscribe to all market data
                             var symbolCount = 0;
@@ -1441,7 +1613,7 @@ namespace QuantConnect.Brokerages.IG
                             {
                                 try
                                 {
-                                    _streamingClient.SubscribeToMarketData(kvp.Value);
+                                    _streamingClient.SubscribeToPrices(kvp.Value);
                                     symbolCount++;
                                 }
                                 catch (Exception ex)
@@ -1491,6 +1663,154 @@ namespace QuantConnect.Brokerages.IG
         }
 
         /// <summary>
+        /// Polls IG REST API for price data as fallback when Lightstreamer streaming fails
+        /// </summary>
+        private async Task PollPricesViaRest(CancellationToken cancellationToken)
+        {
+            // Wait a few seconds for Lightstreamer to attempt connection
+            await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
+
+            Log.Trace("IGBrokerage.PollPricesViaRest(): Starting REST price polling fallback...");
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    // Only poll if we have subscriptions and the streaming client isn't connected
+                    if (_subscribedEpics.Count > 0 && _restClient != null)
+                    {
+                        foreach (var kvp in _subscribedEpics)
+                        {
+                            if (cancellationToken.IsCancellationRequested) break;
+
+                            try
+                            {
+                                // Get or fetch conversion info for this EPIC
+                                var conversion = GetInstrumentConversion(kvp.Value);
+
+                                _nonTradingRateGate.WaitToProceed();
+                                var marketDetails = _restClient.GetMarketDetails(kvp.Value);
+
+                                var snapshot = marketDetails["snapshot"];
+                                if (snapshot != null)
+                                {
+                                    var bid = snapshot["bid"]?.Value<decimal>();
+                                    var ask = snapshot["offer"]?.Value<decimal>();
+
+                                    if (bid.HasValue && ask.HasValue)
+                                    {
+                                        // Convert IG points to standard prices
+                                        var bidPrice = ConvertIGPriceToLean(bid.Value, conversion.PipValue);
+                                        var askPrice = ConvertIGPriceToLean(ask.Value, conversion.PipValue);
+
+                                        var tick = new Tick
+                                        {
+                                            Symbol = kvp.Key,
+                                            Time = DateTime.UtcNow,
+                                            Value = (bidPrice + askPrice) / 2,
+                                            BidPrice = bidPrice,
+                                            AskPrice = askPrice,
+                                            TickType = TickType.Quote
+                                        };
+
+                                        if (_aggregator != null)
+                                        {
+                                            lock (_lock)
+                                            {
+                                                _aggregator.Update(tick);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Error($"IGBrokerage.PollPricesViaRest(): Error polling {kvp.Value}: {ex.Message}");
+                            }
+                        }
+                    }
+
+                    // Poll every 2 seconds
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"IGBrokerage.PollPricesViaRest(): Error: {ex.Message}");
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+            }
+
+            Log.Trace("IGBrokerage.PollPricesViaRest(): Polling stopped");
+        }
+
+        /// <summary>
+        /// Polls for deal confirmation via REST API (fallback when Lightstreamer is unavailable)
+        /// </summary>
+        private void PollDealConfirmation(Order order, string dealReference, decimal pipValue, decimal contractSize)
+        {
+            try
+            {
+                // Wait briefly for the deal to be processed
+                Thread.Sleep(500);
+
+                _nonTradingRateGate.WaitToProceed();
+                var confirmation = _restClient.GetDealConfirmation(dealReference);
+
+                var dealStatus = confirmation["dealStatus"]?.ToString();
+                var reason = confirmation["reason"]?.ToString();
+                var dealId = confirmation["dealId"]?.ToString();
+                var level = confirmation["level"]?.Value<decimal>();
+                var size = confirmation["size"]?.Value<decimal>();
+
+                Log.Trace($"IGBrokerage.PollDealConfirmation(): DealRef={dealReference}, Status={dealStatus}, " +
+                         $"Reason={reason}, Level={level}, Size={size}, DealId={dealId}");
+
+                if (dealStatus == "ACCEPTED")
+                {
+                    // Update broker ID mapping to use dealId
+                    if (!string.IsNullOrEmpty(dealId))
+                    {
+                        _ordersByBrokerId.TryRemove(dealReference, out _);
+                        _ordersByBrokerId[dealId] = order;
+                        _brokerIdByOrderId[order.Id] = dealId;
+                    }
+
+                    // Convert fill price and size from IG format
+                    var fillPrice = level.HasValue ? level.Value * pipValue : 0m;
+                    var fillQuantity = size.HasValue ? size.Value * contractSize : Math.Abs(order.Quantity);
+                    if (order.Direction == OrderDirection.Sell) fillQuantity = -fillQuantity;
+
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Filled,
+                        FillPrice = fillPrice,
+                        FillQuantity = fillQuantity
+                    });
+
+                    Log.Trace($"IGBrokerage.PollDealConfirmation(): Order {order.Id} filled at {fillPrice}");
+                }
+                else if (dealStatus == "REJECTED")
+                {
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Invalid,
+                        Message = $"Order rejected: {reason}"
+                    });
+
+                    Log.Trace($"IGBrokerage.PollDealConfirmation(): Order {order.Id} rejected: {reason}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerage.PollDealConfirmation(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Maps IG order status to LEAN OrderStatus
         /// </summary>
         private OrderStatus MapIGStatusToOrderStatus(string igStatus)
@@ -1511,7 +1831,7 @@ namespace QuantConnect.Brokerages.IG
                 case "PARTIALLY_FILLED":
                     return OrderStatus.PartiallyFilled;
                 default:
-                    Log.Warning($"IGBrokerage.MapIGStatusToOrderStatus(): Unknown status '{igStatus}'");
+                    Log.Trace($"IGBrokerage.MapIGStatusToOrderStatus(): Unknown status '{igStatus}'");
                     return OrderStatus.None;
             }
         }
@@ -1544,12 +1864,12 @@ namespace QuantConnect.Brokerages.IG
                 var key = keyValue[0].Trim().ToUpperInvariant();
                 var value = keyValue[1].Trim();
 
-                if (key == "SL" && decimal.TryParse(value, out var sl))
+                if (key == "SL" && decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var sl))
                 {
                     stopLossPrice = sl;
                     Log.Trace($"IGBrokerage.ParseStopLossAndTakeProfit(): Parsed stop loss: {sl}");
                 }
-                else if (key == "TP" && decimal.TryParse(value, out var tp))
+                else if (key == "TP" && decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var tp))
                 {
                     takeProfitPrice = tp;
                     Log.Trace($"IGBrokerage.ParseStopLossAndTakeProfit(): Parsed take profit: {tp}");

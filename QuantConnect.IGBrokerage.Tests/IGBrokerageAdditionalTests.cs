@@ -216,14 +216,14 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void ValidateSubscription_UnmappedSymbol_ReturnsFalse()
         {
-            // Arrange
+            // Arrange - Use Index type since Forex constructs EPICs for unknown symbols
             var brokerage = new IGBrokerage();
             var method = GetPrivateMethod(brokerage, "ValidateSubscription");
-            var symbol = Symbol.Create("INVALIDXYZ", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("INVALIDXYZ", SecurityType.Index, Market.IG);
 
             // Act
             var result = (bool)method.Invoke(brokerage,
-                new object[] { symbol, SecurityType.Forex, Resolution.Minute, TickType.Trade });
+                new object[] { symbol, SecurityType.Index, Resolution.Minute, TickType.Trade });
 
             // Assert
             Assert.IsFalse(result, "Should reject unmapped symbol");

@@ -40,8 +40,10 @@ namespace QuantConnect.Brokerages.IG.Tests
             var client = new IGRestApiClient(apiUrl, apiKey);
 
             // Act
-            var (cst, securityToken, lightstreamerEndpoint) =
-                client.Authenticate(identifier, password);
+            var loginResponse = client.Login(identifier, password);
+            var cst = loginResponse.Cst;
+            var securityToken = loginResponse.SecurityToken;
+            var lightstreamerEndpoint = loginResponse.LightstreamerEndpoint;
 
             // Assert
             Assert.IsNotNull(cst, "CST token should not be null");
@@ -68,7 +70,7 @@ namespace QuantConnect.Brokerages.IG.Tests
 
             // Act & Assert
             Assert.Throws<Exception>(() =>
-                client.Authenticate("invalid-user", "invalid-password"),
+                client.Login("invalid-user", "invalid-password"),
                 "Authentication with invalid credentials should throw exception"
             );
         }
@@ -188,7 +190,8 @@ namespace QuantConnect.Brokerages.IG.Tests
             }
 
             var client = new IGRestApiClient(apiUrl, apiKey);
-            client.Authenticate(identifier, password);
+            var loginResponse = client.Login(identifier, password);
+            client.SetSessionTokens(loginResponse.Cst, loginResponse.SecurityToken);
 
             return client;
         }

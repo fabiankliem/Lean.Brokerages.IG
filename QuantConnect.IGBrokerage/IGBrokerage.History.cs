@@ -42,6 +42,10 @@ namespace QuantConnect.Brokerages.IG
                     request.EndTimeUtc
                 );
 
+                // Get conversion info for this EPIC
+                var conversion = GetInstrumentConversion(epic);
+                var pv = conversion.PipValue;
+
                 var result = new List<BaseData>();
 
                 foreach (var price in prices)
@@ -50,26 +54,31 @@ namespace QuantConnect.Brokerages.IG
 
                     if (request.TickType == TickType.Quote)
                     {
+                        // Convert IG points to standard prices
                         data = new QuoteBar
                         {
                             Symbol = request.Symbol,
                             Time = price.SnapshotTime,
-                            Bid = new Bar(price.OpenBid, price.HighBid, price.LowBid, price.CloseBid),
-                            Ask = new Bar(price.OpenAsk, price.HighAsk, price.LowAsk, price.CloseAsk),
+                            Bid = new Bar(
+                                price.OpenBid * pv, price.HighBid * pv,
+                                price.LowBid * pv, price.CloseBid * pv),
+                            Ask = new Bar(
+                                price.OpenAsk * pv, price.HighAsk * pv,
+                                price.LowAsk * pv, price.CloseAsk * pv),
                             Period = request.Resolution.ToTimeSpan()
                         };
                     }
                     else
                     {
-                        // Trade bar - use mid prices
+                        // Trade bar - use mid prices, converted
                         data = new TradeBar
                         {
                             Symbol = request.Symbol,
                             Time = price.SnapshotTime,
-                            Open = (price.OpenBid + price.OpenAsk) / 2,
-                            High = (price.HighBid + price.HighAsk) / 2,
-                            Low = (price.LowBid + price.LowAsk) / 2,
-                            Close = (price.CloseBid + price.CloseAsk) / 2,
+                            Open = (price.OpenBid + price.OpenAsk) / 2 * pv,
+                            High = (price.HighBid + price.HighAsk) / 2 * pv,
+                            Low = (price.LowBid + price.LowAsk) / 2 * pv,
+                            Close = (price.CloseBid + price.CloseAsk) / 2 * pv,
                             Volume = price.Volume ?? 0,
                             Period = request.Resolution.ToTimeSpan()
                         };

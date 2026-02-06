@@ -16,6 +16,7 @@
 using System;
 using System.Collections.Generic;
 using QuantConnect.Configuration;
+using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Securities;

@@ -63,7 +63,9 @@ namespace QuantConnect.Brokerages.IG.ToolBox
                     identifier,
                     password,
                     accountId,
-                    environment
+                    environment,
+                    null,
+                    null
                 );
 
                 // Subscribe to error messages
@@ -131,28 +133,12 @@ namespace QuantConnect.Brokerages.IG.ToolBox
             var dataTimeZone = _marketHoursDatabase.GetDataTimeZone(
                 symbol.ID.Market, symbol, symbol.SecurityType);
 
-            // Handle canonical symbols (options, futures) by expanding to contracts
+            // Handle canonical symbols - IG doesn't support canonical symbol expansion
             var symbols = new List<Symbol> { symbol };
             if (symbol.IsCanonical())
             {
-                Log.Trace($"IGBrokerageDownloader.Get(): Expanding canonical symbol {symbol}");
-                try
-                {
-                    if (_brokerage is IDataQueueUniverseProvider universeProvider)
-                    {
-                        symbols = universeProvider.LookupSymbols(symbol, includeExpired: true).ToList();
-                        Log.Trace($"IGBrokerageDownloader.Get(): Found {symbols.Count} contracts");
-                    }
-                    else
-                    {
-                        Log.Warning("IGBrokerageDownloader.Get(): Brokerage does not support canonical symbol expansion");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"IGBrokerageDownloader.Get(): Error expanding canonical symbol: {ex.Message}");
-                    yield break;
-                }
+                Log.Trace($"IGBrokerageDownloader.Get(): Canonical symbols not supported for IG Markets");
+                yield break;
             }
 
             // Download data for each symbol

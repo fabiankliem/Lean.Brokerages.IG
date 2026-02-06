@@ -40,7 +40,7 @@ namespace QuantConnect.Brokerages.IG.Tests
 
             // Assert
             Assert.AreEqual(0m, fee.Value.Amount);
-            Assert.AreEqual("USD", fee.Value.Currency); // Zero fee uses USD
+            Assert.AreEqual(Currencies.NullCurrency, fee.Value.Currency); // Zero fee uses QCC
         }
 
         [Test]
@@ -237,7 +237,7 @@ namespace QuantConnect.Brokerages.IG.Tests
             };
 
             // Act
-            var fee = IGOrderFeeCalculator.CalculateFee(orderEvent);
+            var fee = IGOrderFeeCalculator.CalculateFee(order, orderEvent);
 
             // Assert
             Assert.AreEqual(400m, fee.Value.Amount);
@@ -262,7 +262,7 @@ namespace QuantConnect.Brokerages.IG.Tests
             };
 
             // Act
-            var fee = IGOrderFeeCalculator.CalculateFee(orderEvent);
+            var fee = IGOrderFeeCalculator.CalculateFee(order, orderEvent);
 
             // Assert - Half the full quantity
             Assert.AreEqual(200m, fee.Value.Amount);
@@ -286,7 +286,7 @@ namespace QuantConnect.Brokerages.IG.Tests
             };
 
             // Act
-            var fee = IGOrderFeeCalculator.CalculateFee(orderEvent);
+            var fee = IGOrderFeeCalculator.CalculateFee(order, orderEvent);
 
             // Assert - No fee for submitted orders
             Assert.AreEqual(0m, fee.Value.Amount);

@@ -96,11 +96,12 @@ namespace QuantConnect.Brokerages.IG
         /// <summary>
         /// Calculate fee for a filled order event
         /// </summary>
+        /// <param name="order">The order</param>
         /// <param name="orderEvent">The order event</param>
         /// <returns>Order fee in GBP</returns>
-        public static OrderFee CalculateFee(OrderEvent orderEvent)
+        public static OrderFee CalculateFee(Order order, OrderEvent orderEvent)
         {
-            if (orderEvent?.Order == null)
+            if (order == null || orderEvent == null)
             {
                 return OrderFee.Zero;
             }
@@ -113,7 +114,7 @@ namespace QuantConnect.Brokerages.IG
             }
 
             return CalculateFee(
-                orderEvent.Order,
+                order,
                 orderEvent.FillPrice,
                 orderEvent.FillQuantity
             );

@@ -258,10 +258,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
-            var order = new MarketOrder(symbol, 1000, DateTime.UtcNow)
-            {
-                Tag = "SL:1.0800"
-            };
+            var order = new MarketOrder(symbol, 1000, DateTime.UtcNow, "SL:1.0800");
 
             // Act
             var result = _brokerage.PlaceOrder(order);
@@ -282,10 +279,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
-            var order = new MarketOrder(symbol, 1000, DateTime.UtcNow)
-            {
-                Tag = "TP:1.1200"
-            };
+            var order = new MarketOrder(symbol, 1000, DateTime.UtcNow, "TP:1.1200");
 
             // Act
             var result = _brokerage.PlaceOrder(order);
@@ -306,10 +300,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
-            var order = new MarketOrder(symbol, 1000, DateTime.UtcNow)
-            {
-                Tag = "SL:1.0800;TP:1.1200"
-            };
+            var order = new MarketOrder(symbol, 1000, DateTime.UtcNow, "SL:1.0800;TP:1.1200");
 
             // Act
             var result = _brokerage.PlaceOrder(order);
@@ -367,7 +358,8 @@ namespace QuantConnect.Brokerages.IG.Tests
                 order.Id,
                 new UpdateOrderFields { LimitPrice = 1.0600m }
             );
-            var result = _brokerage.UpdateOrder(updateRequest);
+            order.ApplyUpdateOrderRequest(updateRequest);
+            var result = _brokerage.UpdateOrder(order);
 
             // Assert
             Assert.IsTrue(result, "Order update should succeed");
@@ -394,7 +386,8 @@ namespace QuantConnect.Brokerages.IG.Tests
                 order.Id,
                 new UpdateOrderFields { StopPrice = 1.1600m }
             );
-            var result = _brokerage.UpdateOrder(updateRequest);
+            order.ApplyUpdateOrderRequest(updateRequest);
+            var result = _brokerage.UpdateOrder(order);
 
             // Assert
             Assert.IsTrue(result, "Order update should succeed");
@@ -420,7 +413,8 @@ namespace QuantConnect.Brokerages.IG.Tests
                 order.Id,
                 new UpdateOrderFields { Quantity = 2000 }
             );
-            var result = _brokerage.UpdateOrder(updateRequest);
+            order.ApplyUpdateOrderRequest(updateRequest);
+            var result = _brokerage.UpdateOrder(order);
 
             // Assert
             Assert.IsTrue(result, "Order quantity update should succeed");
@@ -433,15 +427,12 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void UpdateOrder_NonExistentOrder_ReturnsFalse()
         {
-            // Arrange
-            var updateRequest = new UpdateOrderRequest(
-                DateTime.UtcNow,
-                999999, // Non-existent order ID
-                new UpdateOrderFields { LimitPrice = 1.0500m }
-            );
+            // Arrange - Create an order that was never placed through the brokerage
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var order = new LimitOrder(symbol, 1000, 1.0500m, DateTime.UtcNow);
 
-            // Act
-            var result = _brokerage.UpdateOrder(updateRequest);
+            // Act - The brokerage has no broker ID mapping for this order, so it should fail
+            var result = _brokerage.UpdateOrder(order);
 
             // Assert
             Assert.IsFalse(result, "Updating non-existent order should return false");
@@ -488,14 +479,11 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void CancelOrder_NonExistentOrder_ReturnsFalse()
         {
-            // Arrange
+            // Arrange - Create an order that was never placed through the brokerage
             var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
-            var order = new LimitOrder(symbol, 1000, 1.0500m, DateTime.UtcNow)
-            {
-                Id = 999999 // Non-existent order ID
-            };
+            var order = new LimitOrder(symbol, 1000, 1.0500m, DateTime.UtcNow);
 
-            // Act
+            // Act - The brokerage has no broker ID mapping for this order, so it should fail
             var result = _brokerage.CancelOrder(order);
 
             // Assert

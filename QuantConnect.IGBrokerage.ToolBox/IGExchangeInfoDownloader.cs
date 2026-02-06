@@ -98,6 +98,8 @@ namespace QuantConnect.Brokerages.IG.ToolBox
             var instruments = new HashSet<string>(); // Prevent duplicates
             var processedCount = 0;
 
+            var results = new List<string>();
+
             foreach (var searchTerm in searchTerms)
             {
                 try
@@ -117,7 +119,7 @@ namespace QuantConnect.Brokerages.IG.ToolBox
                         if (!string.IsNullOrEmpty(csvLine))
                         {
                             processedCount++;
-                            yield return csvLine;
+                            results.Add(csvLine);
                         }
                     }
 
@@ -131,6 +133,11 @@ namespace QuantConnect.Brokerages.IG.ToolBox
             }
 
             Log.Trace($"IGExchangeInfoDownloader.Get(): Downloaded {processedCount} instruments");
+
+            foreach (var result in results)
+            {
+                yield return result;
+            }
         }
 
         /// <summary>
