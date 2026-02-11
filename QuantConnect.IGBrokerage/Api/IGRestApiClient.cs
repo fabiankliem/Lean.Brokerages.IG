@@ -319,6 +319,7 @@ namespace QuantConnect.Brokerages.IG.Api
         public List<IGPriceCandle> GetHistoricalPrices(string epic, string resolution,
             DateTime startDate, DateTime endDate)
         {
+            // TODO: Where can I find this REST endpoint?
             var url = $"{IGApiEndpoints.Prices}/{epic}?resolution={resolution}" +
                       $"&from={startDate:yyyy-MM-ddTHH:mm:ss}&to={endDate:yyyy-MM-ddTHH:mm:ss}";
 
