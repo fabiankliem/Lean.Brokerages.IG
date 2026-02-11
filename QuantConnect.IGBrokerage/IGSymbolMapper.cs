@@ -409,6 +409,7 @@ namespace QuantConnect.Brokerages.IG
         {
             if (symbol == null)
             {
+                // TODO: remove nullability
                 throw new ArgumentNullException(nameof(symbol));
             }
 
