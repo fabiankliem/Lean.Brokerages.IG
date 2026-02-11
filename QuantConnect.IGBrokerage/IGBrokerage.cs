@@ -1255,7 +1255,7 @@ namespace QuantConnect.Brokerages.IG
             }
 
             // Use centralized validation
-            return ValidateSubscription(symbol, symbol.SecurityType, Resolution.Minute, TickType.Trade);
+            return ValidateSubscription(symbol, symbol.SecurityType, Resolution.Minute, TickType.Trade); // TODO: consider actual resolution/tick type if needed
         }
 
         /// <summary>
