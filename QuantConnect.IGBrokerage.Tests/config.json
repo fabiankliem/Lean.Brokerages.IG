@@ -2,6 +2,7 @@
   "data-folder": "../../../../Lean/Data/",
   "ig-api-url": "https://demo-api.ig.com/gateway/deal",
   "ig-api-key": "",
+  // TODO: rename "ig-identifier" to "ig-username" for clarity
   "ig-identifier": "",
   "ig-password": "",
   "ig-account-id": "",

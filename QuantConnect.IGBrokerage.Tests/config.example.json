@@ -8,6 +8,7 @@
   "// IG Markets API Configuration": "",
   "ig-api-url": "https://demo-api.ig.com/gateway/deal",
   "ig-api-key": "your-api-key-here",
+  // TODO: rename "ig-identifier" to "ig-username" for clarity
   "ig-identifier": "your-username-here",
   "ig-password": "your-password-here",
   "ig-account-id": "your-account-id-here",

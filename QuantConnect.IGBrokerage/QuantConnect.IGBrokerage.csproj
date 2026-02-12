@@ -30,6 +30,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
   </ItemGroup>
   <ItemGroup>
+	 <!-- TODO: Remove reference to lib and use pckg -->
     <ProjectReference Include="..\..\Lean\Brokerages\QuantConnect.Brokerages.csproj" />
     <ProjectReference Include="..\..\Lean\Common\QuantConnect.csproj" />
   </ItemGroup>

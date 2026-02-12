@@ -158,8 +158,8 @@ namespace QuantConnect.Brokerages.IG
             _instrumentConversion = new ConcurrentDictionary<string, (decimal PipValue, decimal ContractSize)>();
 
             // Rate limiting - IG limits: ~40 trading requests/min, ~60 non-trading/min
-            _tradingRateGate = new RateGate(40, TimeSpan.FromMinutes(1));
-            _nonTradingRateGate = new RateGate(60, TimeSpan.FromMinutes(1));
+            _tradingRateGate = new RateGate(40, TimeSpan.FromMinutes(1)); // TODO: It is wrong rate gate limit for trading requests
+            _nonTradingRateGate = new RateGate(60, TimeSpan.FromMinutes(1)); // TODO: It is wrong rate gate limit for non-trading requests
 
             // Symbol mapper for EPIC code translation
             _symbolMapper = new IGSymbolMapper();
@@ -1255,7 +1255,7 @@ namespace QuantConnect.Brokerages.IG
             }
 
             // Use centralized validation
-            return ValidateSubscription(symbol, symbol.SecurityType, Resolution.Minute, TickType.Trade);
+            return ValidateSubscription(symbol, symbol.SecurityType, Resolution.Minute, TickType.Trade); // TODO: consider actual resolution/tick type if needed
         }
 
         /// <summary>
