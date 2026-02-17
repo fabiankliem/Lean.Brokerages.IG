@@ -1,6 +1,6 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
- * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2026 QuantConnect Corporation.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ using System.Reflection;
 using NUnit.Framework;
 using QuantConnect.Util;
 using QuantConnect.Interfaces;
-using QuantConnect.Orders;
 using QuantConnect.Securities;
 
 namespace QuantConnect.Brokerages.IG.Tests
@@ -33,289 +32,197 @@ namespace QuantConnect.Brokerages.IG.Tests
             Assert.IsNotNull(brokerage);
         }
 
+        #region ParseStopLossAndTakeProfit Tests
+
         [Test]
         public void ParseStopLossAndTakeProfit_ValidTag_ParsesCorrectly()
         {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var parseMethod = GetPrivateMethod(brokerage, "ParseStopLossAndTakeProfit");
-            var tag = "SL:1.1000;TP:1.2000";
-            var parameters = new object[] { tag, null, null };
+            var parseMethod = GetStaticMethod("ParseStopLossAndTakeProfit");
+            var parameters = new object[] { "SL:1.1000;TP:1.2000", null, null };
 
-            // Act
-            parseMethod.Invoke(brokerage, parameters);
-            var stopLossPrice = (decimal?)parameters[1];
-            var takeProfitPrice = (decimal?)parameters[2];
+            parseMethod.Invoke(null, parameters);
 
-            // Assert
-            Assert.IsNotNull(stopLossPrice);
-            Assert.IsNotNull(takeProfitPrice);
-            Assert.AreEqual(1.1000m, stopLossPrice.Value);
-            Assert.AreEqual(1.2000m, takeProfitPrice.Value);
+            Assert.AreEqual(1.1000m, (decimal?)parameters[1]);
+            Assert.AreEqual(1.2000m, (decimal?)parameters[2]);
         }
 
         [Test]
         public void ParseStopLossAndTakeProfit_OnlyStopLoss_ParsesCorrectly()
         {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var parseMethod = GetPrivateMethod(brokerage, "ParseStopLossAndTakeProfit");
-            var tag = "SL:1.0500";
-            var parameters = new object[] { tag, null, null };
+            var parseMethod = GetStaticMethod("ParseStopLossAndTakeProfit");
+            var parameters = new object[] { "SL:1.0500", null, null };
 
-            // Act
-            parseMethod.Invoke(brokerage, parameters);
-            var stopLossPrice = (decimal?)parameters[1];
-            var takeProfitPrice = (decimal?)parameters[2];
+            parseMethod.Invoke(null, parameters);
 
-            // Assert
-            Assert.IsNotNull(stopLossPrice);
-            Assert.IsNull(takeProfitPrice);
-            Assert.AreEqual(1.0500m, stopLossPrice.Value);
+            Assert.AreEqual(1.0500m, (decimal?)parameters[1]);
+            Assert.IsNull((decimal?)parameters[2]);
         }
 
         [Test]
         public void ParseStopLossAndTakeProfit_OnlyTakeProfit_ParsesCorrectly()
         {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var parseMethod = GetPrivateMethod(brokerage, "ParseStopLossAndTakeProfit");
-            var tag = "TP:1.3000";
-            var parameters = new object[] { tag, null, null };
+            var parseMethod = GetStaticMethod("ParseStopLossAndTakeProfit");
+            var parameters = new object[] { "TP:1.3000", null, null };
 
-            // Act
-            parseMethod.Invoke(brokerage, parameters);
-            var stopLossPrice = (decimal?)parameters[1];
-            var takeProfitPrice = (decimal?)parameters[2];
+            parseMethod.Invoke(null, parameters);
 
-            // Assert
-            Assert.IsNull(stopLossPrice);
-            Assert.IsNotNull(takeProfitPrice);
-            Assert.AreEqual(1.3000m, takeProfitPrice.Value);
+            Assert.IsNull((decimal?)parameters[1]);
+            Assert.AreEqual(1.3000m, (decimal?)parameters[2]);
         }
 
         [Test]
         public void ParseStopLossAndTakeProfit_InvalidTag_ReturnsNull()
         {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var parseMethod = GetPrivateMethod(brokerage, "ParseStopLossAndTakeProfit");
-            var tag = "Invalid tag format";
-            var parameters = new object[] { tag, null, null };
+            var parseMethod = GetStaticMethod("ParseStopLossAndTakeProfit");
+            var parameters = new object[] { "Invalid tag format", null, null };
 
-            // Act
-            parseMethod.Invoke(brokerage, parameters);
-            var stopLossPrice = (decimal?)parameters[1];
-            var takeProfitPrice = (decimal?)parameters[2];
+            parseMethod.Invoke(null, parameters);
 
-            // Assert
-            Assert.IsNull(stopLossPrice);
-            Assert.IsNull(takeProfitPrice);
+            Assert.IsNull((decimal?)parameters[1]);
+            Assert.IsNull((decimal?)parameters[2]);
         }
 
         [Test]
-        public void CalculatePriceDistance_BuyOrder_StopLossBelow_CalculatesCorrectly()
+        public void ParseStopLossAndTakeProfit_EmptyTag_ReturnsNull()
         {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var calculateMethod = GetPrivateMethod(brokerage, "CalculatePriceDistance");
-            var entryPrice = 1.2000m;
-            var stopLossPrice = 1.1900m;  // 100 points below
-            var direction = OrderDirection.Buy;
+            var parseMethod = GetStaticMethod("ParseStopLossAndTakeProfit");
+            var parameters = new object[] { "", null, null };
 
-            // Act
-            var distance = (decimal)calculateMethod.Invoke(brokerage, new object[] { entryPrice, stopLossPrice, direction });
+            parseMethod.Invoke(null, parameters);
 
-            // Assert
-            Assert.AreEqual(0.0100m, distance);  // 100 points
+            Assert.IsNull((decimal?)parameters[1]);
+            Assert.IsNull((decimal?)parameters[2]);
         }
 
-        [Test]
-        public void CalculatePriceDistance_BuyOrder_TakeProfitAbove_CalculatesCorrectly()
-        {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var calculateMethod = GetPrivateMethod(brokerage, "CalculatePriceDistance");
-            var entryPrice = 1.2000m;
-            var takeProfitPrice = 1.2150m;  // 150 points above
-            var direction = OrderDirection.Buy;
+        #endregion
 
-            // Act - For take profit, we pass Sell direction (opposite)
-            var distance = (decimal)calculateMethod.Invoke(brokerage, new object[] { entryPrice, takeProfitPrice, OrderDirection.Sell });
-
-            // Assert
-            Assert.AreEqual(0.0150m, distance);  // 150 points
-        }
+        #region CanSubscribe Tests
 
         [Test]
-        public void CalculatePriceDistance_SellOrder_StopLossAbove_CalculatesCorrectly()
+        public void CanSubscribe_SupportedForexSymbol_ReturnsTrue()
         {
-            // Arrange
             var brokerage = new IGBrokerage();
-            var calculateMethod = GetPrivateMethod(brokerage, "CalculatePriceDistance");
-            var entryPrice = 1.2000m;
-            var stopLossPrice = 1.2100m;  // 100 points above
-            var direction = OrderDirection.Sell;
-
-            // Act
-            var distance = (decimal)calculateMethod.Invoke(brokerage, new object[] { entryPrice, stopLossPrice, direction });
-
-            // Assert
-            Assert.AreEqual(0.0100m, distance);  // 100 points
-        }
-
-        [Test]
-        public void CalculatePriceDistance_SellOrder_TakeProfitBelow_CalculatesCorrectly()
-        {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var calculateMethod = GetPrivateMethod(brokerage, "CalculatePriceDistance");
-            var entryPrice = 1.2000m;
-            var takeProfitPrice = 1.1850m;  // 150 points below
-            var direction = OrderDirection.Sell;
-
-            // Act - For take profit, we pass Buy direction (opposite)
-            var distance = (decimal)calculateMethod.Invoke(brokerage, new object[] { entryPrice, takeProfitPrice, OrderDirection.Buy });
-
-            // Assert
-            Assert.AreEqual(0.0150m, distance);  // 150 points
-        }
-
-        [Test]
-        public void ValidateSubscription_SupportedSymbol_ReturnsTrue()
-        {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+            var method = GetInstanceMethod(brokerage, "CanSubscribe");
             var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
 
-            // Act
-            var result = (bool)method.Invoke(brokerage,
-                new object[] { symbol, SecurityType.Forex, Resolution.Minute, TickType.Quote });
+            var result = (bool)method.Invoke(brokerage, new object[] { symbol });
 
-            // Assert
-            Assert.IsTrue(result, "Should validate supported forex symbol");
+            Assert.IsTrue(result, "Should accept supported forex symbol");
         }
 
         [Test]
-        public void ValidateSubscription_UnsupportedSecurityType_ReturnsFalse()
+        public void CanSubscribe_SupportedIndexSymbol_ReturnsTrue()
         {
-            // Arrange
             var brokerage = new IGBrokerage();
-            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
-            var symbol = Symbol.Create("ES", SecurityType.Future, Market.IG);
+            var method = GetInstanceMethod(brokerage, "CanSubscribe");
+            var symbol = Symbol.Create("SPX", SecurityType.Index, Market.IG);
 
-            // Act
-            var result = (bool)method.Invoke(brokerage,
-                new object[] { symbol, SecurityType.Future, Resolution.Minute, TickType.Trade });
+            var result = (bool)method.Invoke(brokerage, new object[] { symbol });
 
-            // Assert
+            Assert.IsTrue(result, "Should accept supported index symbol");
+        }
+
+        [Test]
+        public void CanSubscribe_SupportedCryptoSymbol_ReturnsTrue()
+        {
+            var brokerage = new IGBrokerage();
+            var method = GetInstanceMethod(brokerage, "CanSubscribe");
+            var symbol = Symbol.Create("BTCUSD", SecurityType.Crypto, Market.IG);
+
+            var result = (bool)method.Invoke(brokerage, new object[] { symbol });
+
+            Assert.IsTrue(result, "Should accept supported crypto symbol");
+        }
+
+        [Test]
+        public void CanSubscribe_SupportedCfdSymbol_ReturnsTrue()
+        {
+            var brokerage = new IGBrokerage();
+            var method = GetInstanceMethod(brokerage, "CanSubscribe");
+            var symbol = Symbol.Create("XAUUSD", SecurityType.Cfd, Market.IG);
+
+            var result = (bool)method.Invoke(brokerage, new object[] { symbol });
+
+            Assert.IsTrue(result, "Should accept supported CFD symbol");
+        }
+
+        [Test]
+        public void CanSubscribe_SupportedEquitySymbol_ReturnsTrue()
+        {
+            var brokerage = new IGBrokerage();
+            var method = GetInstanceMethod(brokerage, "CanSubscribe");
+            var symbol = Symbol.Create("AAPL", SecurityType.Equity, Market.IG);
+
+            var result = (bool)method.Invoke(brokerage, new object[] { symbol });
+
+            Assert.IsTrue(result, "Should accept supported equity symbol");
+        }
+
+        [Test]
+        public void CanSubscribe_UnsupportedFutureSecurityType_ReturnsFalse()
+        {
+            var brokerage = new IGBrokerage();
+            var method = GetInstanceMethod(brokerage, "CanSubscribe");
+            var symbol = Symbol.Create("ES", SecurityType.Future, Market.CME);
+
+            var result = (bool)method.Invoke(brokerage, new object[] { symbol });
+
             Assert.IsFalse(result, "Should reject unsupported Future security type");
         }
 
         [Test]
-        public void ValidateSubscription_UnmappedSymbol_ReturnsFalse()
+        public void CanSubscribe_MultipleSecurityTypes_ValidatesCorrectly()
         {
-            // Arrange - Use Index type since Forex constructs EPICs for unknown symbols
             var brokerage = new IGBrokerage();
-            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
-            var symbol = Symbol.Create("INVALIDXYZ", SecurityType.Index, Market.IG);
-
-            // Act
-            var result = (bool)method.Invoke(brokerage,
-                new object[] { symbol, SecurityType.Index, Resolution.Minute, TickType.Trade });
-
-            // Assert
-            Assert.IsFalse(result, "Should reject unmapped symbol");
-        }
-
-        [Test]
-        public void ValidateSubscription_TickResolution_ReturnsFalse()
-        {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
-
-            // Act
-            var result = (bool)method.Invoke(brokerage,
-                new object[] { symbol, SecurityType.Forex, Resolution.Tick, TickType.Quote });
-
-            // Assert
-            Assert.IsFalse(result, "Should reject Tick resolution");
-        }
-
-        [Test]
-        public void ValidateSubscription_OpenInterestTickType_ReturnsFalse()
-        {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
-
-            // Act
-            var result = (bool)method.Invoke(brokerage,
-                new object[] { symbol, SecurityType.Forex, Resolution.Minute, TickType.OpenInterest });
-
-            // Assert
-            Assert.IsFalse(result, "Should reject OpenInterest tick type");
-        }
-
-        [Test]
-        public void ValidateSubscription_IndexWithQuote_ReturnsTrue()
-        {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
-            var symbol = Symbol.Create("SPX", SecurityType.Index, Market.IG);
-
-            // Act - Should warn but still return true
-            var result = (bool)method.Invoke(brokerage,
-                new object[] { symbol, SecurityType.Index, Resolution.Minute, TickType.Quote });
-
-            // Assert
-            Assert.IsTrue(result, "Should validate but warn about Index with Quote");
-        }
-
-        [Test]
-        public void ValidateSubscription_MultipleSecurityTypes_ValidatesCorrectly()
-        {
-            // Arrange
-            var brokerage = new IGBrokerage();
-            var method = GetPrivateMethod(brokerage, "ValidateSubscription");
+            var method = GetInstanceMethod(brokerage, "CanSubscribe");
 
             var testCases = new[]
             {
-                (Symbol.Create("EURUSD", SecurityType.Forex, Market.IG), SecurityType.Forex, true),
-                (Symbol.Create("SPX", SecurityType.Index, Market.IG), SecurityType.Index, true),
-                (Symbol.Create("BTCUSD", SecurityType.Crypto, Market.IG), SecurityType.Crypto, true),
-                (Symbol.Create("XAUUSD", SecurityType.Cfd, Market.IG), SecurityType.Cfd, true),
-                (Symbol.Create("AAPL", SecurityType.Equity, Market.IG), SecurityType.Equity, true),
+                (Symbol.Create("EURUSD", SecurityType.Forex, Market.IG), true),
+                (Symbol.Create("SPX", SecurityType.Index, Market.IG), true),
+                (Symbol.Create("BTCUSD", SecurityType.Crypto, Market.IG), true),
+                (Symbol.Create("XAUUSD", SecurityType.Cfd, Market.IG), true),
+                (Symbol.Create("AAPL", SecurityType.Equity, Market.IG), true),
+                (Symbol.Create("ES", SecurityType.Future, Market.CME), false),
             };
 
-            // Act & Assert
-            foreach (var (symbol, secType, expected) in testCases)
+            foreach (var (symbol, expected) in testCases)
             {
-                var result = (bool)method.Invoke(brokerage,
-                    new object[] { symbol, secType, Resolution.Minute, TickType.Trade });
-                Assert.AreEqual(expected, result, $"Validation failed for {symbol.Value} ({secType})");
+                var result = (bool)method.Invoke(brokerage, new object[] { symbol });
+                Assert.AreEqual(expected, result, $"Validation failed for {symbol.Value} ({symbol.SecurityType})");
             }
         }
 
-        /// <summary>
-        /// Helper method to access private methods via reflection for testing
-        /// </summary>
-        private MethodInfo GetPrivateMethod(object obj, string methodName)
+        #endregion
+
+        #region Helpers
+
+        private static MethodInfo GetStaticMethod(string methodName)
+        {
+            var method = typeof(IGBrokerage).GetMethod(methodName,
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            if (method == null)
+            {
+                throw new InvalidOperationException($"Static method '{methodName}' not found on IGBrokerage");
+            }
+
+            return method;
+        }
+
+        private static MethodInfo GetInstanceMethod(object obj, string methodName)
         {
             var method = obj.GetType().GetMethod(methodName,
                 BindingFlags.NonPublic | BindingFlags.Instance);
 
             if (method == null)
             {
-                throw new InvalidOperationException($"Method '{methodName}' not found");
+                throw new InvalidOperationException($"Instance method '{methodName}' not found on {obj.GetType().Name}");
             }
 
             return method;
         }
+
+        #endregion
     }
 }

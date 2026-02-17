@@ -1,6 +1,6 @@
 /*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
- * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2026 QuantConnect Corporation.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using QuantConnect.Brokerages;
 
@@ -31,6 +32,18 @@ namespace QuantConnect.Brokerages.IG
     /// </remarks>
     public class IGSymbolMapper : ISymbolMapper
     {
+        /// <summary>
+        /// Security types supported by IG Markets brokerage
+        /// </summary>
+        public static readonly FrozenSet<SecurityType> SupportedSecurityTypes = new HashSet<SecurityType>
+        {
+            SecurityType.Forex,
+            SecurityType.Index,
+            SecurityType.Cfd,
+            SecurityType.Crypto,
+            SecurityType.Equity
+        }.ToFrozenSet();
+
         // Comprehensive Forex pair mappings - Major, Minor, and Exotic pairs
         private static readonly Dictionary<string, string> ForexEpicMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -407,11 +420,6 @@ namespace QuantConnect.Brokerages.IG
         /// <returns>The IG EPIC code</returns>
         public string GetBrokerageSymbol(Symbol symbol)
         {
-            if (symbol == null)
-            {
-                throw new ArgumentNullException(nameof(symbol));
-            }
-
             var ticker = symbol.Value;
 
             switch (symbol.SecurityType)
@@ -476,11 +484,6 @@ namespace QuantConnect.Brokerages.IG
             decimal strike = 0,
             OptionRight optionRight = OptionRight.Call)
         {
-            if (string.IsNullOrEmpty(brokerageSymbol))
-            {
-                throw new ArgumentNullException(nameof(brokerageSymbol));
-            }
-
             // Try to find in reverse mapping
             if (EpicToSymbolMap.TryGetValue(brokerageSymbol, out var symbolInfo))
             {

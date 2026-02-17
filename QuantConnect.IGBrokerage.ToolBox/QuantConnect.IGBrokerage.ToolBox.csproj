@@ -1,34 +1,28 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
-    <PropertyGroup>
-        <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
-        <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-        <OutputType>Exe</OutputType>
-        <TargetFramework>net10.0</TargetFramework>
-        <Copyright>Copyright ©  2021</Copyright>
-        <OutputPath>bin\$(Configuration)\</OutputPath>
-        <Product>QuantConnect.Brokerages.IG.ToolBox</Product>
-        <AssemblyName>QuantConnect.Brokerages.IG.ToolBox</AssemblyName>
-        <RootNamespace>QuantConnect.Brokerages.IG.ToolBox</RootNamespace>
-        <AssemblyTitle>QuantConnect.Brokerages.IG.ToolBox</AssemblyTitle>
-        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-        <Description>QuantConnect LEAN IG Brokerage: Brokerage IG toolbox plugin for Lean</Description>
-    </PropertyGroup>
-    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-        <DebugType>full</DebugType>
-        <OutputPath>bin\Debug\</OutputPath>
-    </PropertyGroup>
-    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-        <DebugType>pdbonly</DebugType>
-        <OutputPath>bin\Release\</OutputPath>
-    </PropertyGroup>
-    <ItemGroup>
-        <Compile Include="..\..\Lean\Common\Properties\SharedAssemblyInfo.cs" Link="Properties\SharedAssemblyInfo.cs" />
-    </ItemGroup>
-    <ItemGroup>
-        <ProjectReference Include="..\..\Lean\ToolBox\QuantConnect.ToolBox.csproj" />
-        <ProjectReference Include="..\QuantConnect.IGBrokerage\QuantConnect.IGBrokerage.csproj" />
-    </ItemGroup>
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <Product>QuantConnect.Brokerages.IG.ToolBox</Product>
+    <AssemblyName>QuantConnect.Brokerages.IG.ToolBox</AssemblyName>
+    <RootNamespace>QuantConnect.Brokerages.IG.ToolBox</RootNamespace>
+    <AssemblyTitle>QuantConnect.Brokerages.IG.ToolBox</AssemblyTitle>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <Description>QuantConnect LEAN IG Brokerage: Brokerage IG toolbox plugin for Lean</Description>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugType>full</DebugType>
+    <OutputPath>bin\Debug\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <OutputPath>bin\Release\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Lean\ToolBox\QuantConnect.ToolBox.csproj" />
+    <ProjectReference Include="..\QuantConnect.IGBrokerage\QuantConnect.IGBrokerage.csproj" />
+  </ItemGroup>
 </Project>

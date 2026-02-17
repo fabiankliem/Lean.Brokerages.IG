@@ -1,6 +1,6 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
- * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2026 QuantConnect Corporation.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -11,7 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */
+*/
 
 using System;
 using System.Linq;
@@ -38,107 +38,75 @@ namespace QuantConnect.Brokerages.IG.Tests
 
                 return
                 [
-                    // Forex - IG's primary market
                     new TestCaseData(
                         Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
-                        Resolution.Minute,
-                        TimeSpan.FromHours(2),
-                        TickType.Quote,
-                        typeof(QuoteBar),
-                        false),
+                        Resolution.Minute, TimeSpan.FromHours(2),
+                        TickType.Quote, typeof(QuoteBar), false),
 
                     new TestCaseData(
                         Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
-                        Resolution.Hour,
-                        TimeSpan.FromDays(5),
-                        TickType.Quote,
-                        typeof(QuoteBar),
-                        false),
+                        Resolution.Hour, TimeSpan.FromDays(5),
+                        TickType.Quote, typeof(QuoteBar), false),
 
                     new TestCaseData(
                         Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
-                        Resolution.Daily,
-                        TimeSpan.FromDays(30),
-                        TickType.Quote,
-                        typeof(QuoteBar),
-                        false),
+                        Resolution.Daily, TimeSpan.FromDays(30),
+                        TickType.Quote, typeof(QuoteBar), false),
 
                     new TestCaseData(
                         Symbol.Create("GBPUSD", SecurityType.Forex, Market.IG),
-                        Resolution.Minute,
-                        TimeSpan.FromHours(2),
-                        TickType.Trade,
-                        typeof(TradeBar),
-                        false),
+                        Resolution.Minute, TimeSpan.FromHours(2),
+                        TickType.Trade, typeof(TradeBar), false),
 
-                    // Index
                     new TestCaseData(
                         Symbol.Create("SPX", SecurityType.Index, Market.IG),
-                        Resolution.Hour,
-                        TimeSpan.FromDays(3),
-                        TickType.Trade,
-                        typeof(TradeBar),
-                        false),
+                        Resolution.Hour, TimeSpan.FromDays(3),
+                        TickType.Trade, typeof(TradeBar), false),
 
                     new TestCaseData(
                         Symbol.Create("FTSE", SecurityType.Index, Market.IG),
-                        Resolution.Daily,
-                        TimeSpan.FromDays(30),
-                        TickType.Trade,
-                        typeof(TradeBar),
-                        false),
+                        Resolution.Daily, TimeSpan.FromDays(30),
+                        TickType.Trade, typeof(TradeBar), false),
 
-                    // Invalid test - Tick not supported
+                    // Invalid: Tick resolution not supported
                     new TestCaseData(
                         Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
-                        Resolution.Tick,
-                        TimeSpan.FromMinutes(5),
-                        TickType.Quote,
-                        typeof(Tick),
-                        true),
+                        Resolution.Tick, TimeSpan.FromMinutes(5),
+                        TickType.Quote, typeof(Tick), true),
 
-                    // Invalid test - Wrong market
+                    // Invalid: Wrong market
                     new TestCaseData(
                         Symbols.SPY,
-                        Resolution.Daily,
-                        TimeSpan.FromDays(10),
-                        TickType.Trade,
-                        typeof(TradeBar),
-                        true),
+                        Resolution.Daily, TimeSpan.FromDays(10),
+                        TickType.Trade, typeof(TradeBar), true),
+
+                    // Invalid: OpenInterest not supported
+                    new TestCaseData(
+                        Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
+                        Resolution.Daily, TimeSpan.FromDays(10),
+                        TickType.OpenInterest, typeof(TradeBar), true),
                 ];
             }
         }
 
         [Test, TestCaseSource(nameof(TestParameters))]
-        public void GetsHistory(Symbol symbol, Resolution resolution, TimeSpan period, TickType tickType, Type dataType, bool invalidRequest)
+        public void GetsHistory(Symbol symbol, Resolution resolution, TimeSpan period,
+            TickType tickType, Type dataType, bool invalidRequest)
         {
-            // Get configuration from config.json
             var apiUrl = Config.Get("ig-api-url", "https://demo-api.ig.com/gateway/deal");
             var apiKey = Config.Get("ig-api-key");
-            var identifier = Config.Get("ig-identifier");
+            var username = Config.Get("ig-username");
             var password = Config.Get("ig-password");
             var accountId = Config.Get("ig-account-id");
-            var environment = Config.Get("ig-environment", "demo");
 
-            if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(identifier) || string.IsNullOrEmpty(password))
+            if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
             {
-                Assert.Ignore("IGBrokerageHistoryProviderTests: Credentials not configured in config.json");
+                Assert.Ignore("Credentials not configured");
             }
 
-            // Create brokerage with proper initialization
-            var brokerage = new IGBrokerage(
-                apiUrl,
-                apiKey,
-                identifier,
-                password,
-                accountId,
-                environment,
-                null,
-                null
-            );
-
+            var brokerage = new IGBrokerage(apiUrl, username, password, apiKey, accountId, null);
             brokerage.Connect();
-            Thread.Sleep(1000); // Wait for connection
+            Thread.Sleep(1000);
 
             if (!brokerage.IsConnected)
             {
@@ -156,18 +124,10 @@ namespace QuantConnect.Brokerages.IG.Tests
             var requests = new[]
             {
                 new HistoryRequest(
-                    now.Add(-period),
-                    now,
-                    dataType,
-                    symbol,
-                    resolution,
+                    now.Add(-period), now, dataType, symbol, resolution,
                     marketHoursDatabase.GetExchangeHours(symbol.ID.Market, symbol, symbol.SecurityType),
                     marketHoursDatabase.GetDataTimeZone(symbol.ID.Market, symbol, symbol.SecurityType),
-                    resolution,
-                    false,
-                    false,
-                    DataNormalizationMode.Adjusted,
-                    tickType)
+                    resolution, false, false, DataNormalizationMode.Adjusted, tickType)
             };
 
             var historyArray = historyProvider.GetHistory(requests, TimeZones.Utc)?.ToArray();
@@ -175,20 +135,15 @@ namespace QuantConnect.Brokerages.IG.Tests
             if (invalidRequest)
             {
                 Assert.IsNull(historyArray);
+                brokerage.Disconnect();
+                brokerage.Dispose();
                 return;
             }
 
             Assert.IsNotNull(historyArray);
             foreach (var slice in historyArray)
             {
-                if (resolution == Resolution.Tick)
-                {
-                    foreach (var tick in slice.Ticks[symbol])
-                    {
-                        Log.Debug($"{tick}");
-                    }
-                }
-                else if (slice.QuoteBars.TryGetValue(symbol, out var quoteBar))
+                if (slice.QuoteBars.TryGetValue(symbol, out var quoteBar))
                 {
                     Log.Debug($"{quoteBar}");
                 }
@@ -200,17 +155,13 @@ namespace QuantConnect.Brokerages.IG.Tests
 
             if (historyProvider.DataPointCount > 0)
             {
-                // Ordered by time
                 Assert.That(historyArray, Is.Ordered.By("Time"));
-
-                // No repeating bars
                 var timesArray = historyArray.Select(x => x.Time).ToArray();
                 Assert.AreEqual(timesArray.Length, timesArray.Distinct().Count());
             }
 
             Log.Trace("Data points retrieved: " + historyProvider.DataPointCount);
 
-            // Cleanup
             brokerage.Disconnect();
             brokerage.Dispose();
         }

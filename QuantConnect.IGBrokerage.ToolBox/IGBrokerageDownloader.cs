@@ -1,6 +1,6 @@
 /*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
- * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2026 QuantConnect Corporation.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
 using QuantConnect.Logging;
@@ -40,58 +39,35 @@ namespace QuantConnect.Brokerages.IG.ToolBox
         {
             Log.Trace("IGBrokerageDownloader: Initializing...");
 
-            // Get configuration
             var apiUrl = Config.Get("ig-api-url", "https://demo-api.ig.com/gateway/deal");
             var apiKey = Config.Get("ig-api-key");
-            var identifier = Config.Get("ig-identifier");
+            var username = Config.Get("ig-username");
             var password = Config.Get("ig-password");
             var accountId = Config.Get("ig-account-id");
-            var environment = Config.Get("ig-environment", "demo");
 
-            if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(identifier) || string.IsNullOrEmpty(password))
+            if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
             {
                 throw new InvalidOperationException(
-                    "IGBrokerageDownloader requires ig-api-key, ig-identifier, and ig-password in config");
+                    "IGBrokerageDownloader requires ig-api-key, ig-username, and ig-password in config");
             }
 
-            // Initialize brokerage
-            try
-            {
-                _brokerage = new IGBrokerage(
-                    apiUrl,
-                    apiKey,
-                    identifier,
-                    password,
-                    accountId,
-                    environment,
-                    null,
-                    null
-                );
+            _brokerage = new IGBrokerage(apiUrl, username, password, apiKey, accountId, null);
 
-                // Subscribe to error messages
-                _brokerage.Message += (sender, e) =>
+            _brokerage.Message += (sender, e) =>
+            {
+                if (e.Type == BrokerageMessageType.Error)
                 {
-                    if (e.Type == BrokerageMessageType.Error)
-                    {
-                        Log.Error($"IGBrokerageDownloader: {e.Message}");
-                    }
-                    else
-                    {
-                        Log.Trace($"IGBrokerageDownloader: {e.Message}");
-                    }
-                };
+                    Log.Error($"IGBrokerageDownloader: {e.Message}");
+                }
+                else
+                {
+                    Log.Trace($"IGBrokerageDownloader: {e.Message}");
+                }
+            };
 
-                // Connect to IG
-                _brokerage.Connect();
-                Log.Trace("IGBrokerageDownloader: Successfully connected to IG Markets");
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    $"IGBrokerageDownloader: Failed to initialize brokerage: {ex.Message}", ex);
-            }
+            _brokerage.Connect();
+            Log.Trace("IGBrokerageDownloader: Successfully connected to IG Markets");
 
-            // Initialize market hours database
             _marketHoursDatabase = MarketHoursDatabase.FromDataFolder();
         }
 
@@ -111,7 +87,6 @@ namespace QuantConnect.Brokerages.IG.ToolBox
 
             Log.Trace($"IGBrokerageDownloader.Get(): Downloading {symbol} {resolution} from {startUtc:yyyy-MM-dd} to {endUtc:yyyy-MM-dd}");
 
-            // Validate parameters
             if (symbol == null)
             {
                 Log.Error("IGBrokerageDownloader.Get(): Symbol cannot be null");
@@ -124,74 +99,59 @@ namespace QuantConnect.Brokerages.IG.ToolBox
                 yield break;
             }
 
-            // Determine data type from resolution and tick type
+            if (symbol.IsCanonical())
+            {
+                Log.Trace("IGBrokerageDownloader.Get(): Canonical symbols not supported for IG Markets");
+                yield break;
+            }
+
             var dataType = LeanData.GetDataType(resolution, tickType);
 
-            // Get exchange hours and timezone
             var exchangeHours = _marketHoursDatabase.GetExchangeHours(
                 symbol.ID.Market, symbol, symbol.SecurityType);
             var dataTimeZone = _marketHoursDatabase.GetDataTimeZone(
                 symbol.ID.Market, symbol, symbol.SecurityType);
 
-            // Handle canonical symbols - IG doesn't support canonical symbol expansion
-            var symbols = new List<Symbol> { symbol };
-            if (symbol.IsCanonical())
+            var request = new HistoryRequest(
+                startUtc,
+                endUtc,
+                dataType,
+                symbol,
+                resolution,
+                exchangeHours,
+                dataTimeZone,
+                resolution,
+                includeExtendedMarketHours: resolution != Resolution.Hour && resolution != Resolution.Daily,
+                isCustomData: false,
+                dataNormalizationMode: DataNormalizationMode.Raw,
+                tickType: tickType
+            );
+
+            IEnumerable<BaseData> history;
+            try
             {
-                Log.Trace($"IGBrokerageDownloader.Get(): Canonical symbols not supported for IG Markets");
+                history = _brokerage.GetHistory(request);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"IGBrokerageDownloader.Get(): Error getting history for {symbol}: {ex.Message}");
                 yield break;
             }
 
-            // Download data for each symbol
-            foreach (var contractSymbol in symbols)
+            if (history == null)
             {
-                Log.Trace($"IGBrokerageDownloader.Get(): Downloading data for {contractSymbol}");
-
-                // Create history request
-                var request = new HistoryRequest(
-                    startUtc,
-                    endUtc,
-                    dataType,
-                    contractSymbol,
-                    resolution,
-                    exchangeHours,
-                    dataTimeZone,
-                    resolution,
-                    includeExtendedMarketHours: resolution != Resolution.Hour && resolution != Resolution.Daily,
-                    isCustomData: false,
-                    dataNormalizationMode: DataNormalizationMode.Raw,
-                    tickType: tickType
-                );
-
-                // Get history from brokerage
-                IEnumerable<BaseData> history = null;
-                try
-                {
-                    history = _brokerage.GetHistory(request);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"IGBrokerageDownloader.Get(): Error getting history for {contractSymbol}: {ex.Message}");
-                    continue;
-                }
-
-                if (history == null)
-                {
-                    Log.Trace($"IGBrokerageDownloader.Get(): No data available for {contractSymbol}");
-                    continue;
-                }
-
-                // Yield each data point
-                var dataPointCount = 0;
-                foreach (var dataPoint in history)
-                {
-                    dataPointCount++;
-                    yield return dataPoint;
-                }
-
-                Log.Trace($"IGBrokerageDownloader.Get(): Downloaded {dataPointCount} data points for {contractSymbol}");
+                Log.Trace($"IGBrokerageDownloader.Get(): No data available for {symbol}");
+                yield break;
             }
 
-            Log.Trace($"IGBrokerageDownloader.Get(): Download complete for {symbol}");
+            var dataPointCount = 0;
+            foreach (var dataPoint in history)
+            {
+                dataPointCount++;
+                yield return dataPoint;
+            }
+
+            Log.Trace($"IGBrokerageDownloader.Get(): Downloaded {dataPointCount} data points for {symbol}");
         }
 
         /// <summary>

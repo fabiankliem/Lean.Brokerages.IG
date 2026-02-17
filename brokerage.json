@@ -59,7 +59,7 @@
         "required": true
       },
       {
-        "name": "ig-identifier",
+        "name": "ig-username",
         "type": "text",
         "label": "Username",
         "help": "Your IG Markets account username/identifier",

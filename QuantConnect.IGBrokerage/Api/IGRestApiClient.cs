@@ -1,115 +1,132 @@
+/*
+ * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2026 QuantConnect Corporation.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using QuantConnect.Brokerages.IG.Models;
 using QuantConnect.Logging;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
-using System.Threading.Tasks;
+using QuantConnect.Util;
 
 namespace QuantConnect.Brokerages.IG.Api
 {
     /// <summary>
-    /// REST API client for IG Markets
+    /// REST API client for IG Markets trading platform.
+    /// Handles authentication, rate limiting, and all REST endpoint interactions.
     /// </summary>
     public class IGRestApiClient : IDisposable
     {
         private readonly HttpClient _httpClient;
         private readonly string _baseUrl;
-        private readonly string _apiKey;
+        private readonly string _accountId;
+        private readonly RateGate _tradingRateGate;
+        private readonly RateGate _nonTradingRateGate;
 
-        private string _cst;
-        private string _securityToken;
+        /// <summary>
+        /// CST session token, set during Login. Internal for Lightstreamer access.
+        /// </summary>
+        internal string Cst { get; private set; }
 
-        public IGRestApiClient(string baseUrl, string apiKey)
+        /// <summary>
+        /// Security token, set during Login. Internal for Lightstreamer access.
+        /// </summary>
+        internal string SecurityToken { get; private set; }
+
+        /// <summary>
+        /// Lightstreamer endpoint URL, set during Login. Internal for streaming client access.
+        /// </summary>
+        internal string LightstreamerEndpoint { get; private set; }
+
+        /// <summary>
+        /// Creates a new IG REST API client
+        /// </summary>
+        /// <param name="baseUrl">IG API base URL (demo or live)</param>
+        /// <param name="apiKey">IG API key</param>
+        /// <param name="accountId">IG account identifier</param>
+        public IGRestApiClient(string baseUrl, string apiKey, string accountId)
         {
-            if (string.IsNullOrWhiteSpace(baseUrl))
-            {
-                throw new ArgumentException("API URL must not be null or empty", nameof(baseUrl));
-            }
-            if (string.IsNullOrWhiteSpace(apiKey))
-            {
-                throw new ArgumentException("API key must not be null or empty", nameof(apiKey));
-            }
-
             _baseUrl = baseUrl;
-            _apiKey = apiKey;
+            _accountId = accountId;
 
-            var handler = new HttpClientHandler
-            {
-                UseCookies = true,
-                CookieContainer = new System.Net.CookieContainer()
-            };
-            _httpClient = new HttpClient(handler);
+            _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.Add("X-IG-API-KEY", apiKey);
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json; charset=UTF-8");
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "QuantConnect/LEAN");
-        }
 
-        /// <summary>
-        /// Sets session tokens for authenticated requests
-        /// </summary>
-        public void SetSessionTokens(string cst, string securityToken)
-        {
-            _cst = cst;
-            _securityToken = securityToken;
+            // IG rate limits: 40 trading requests/min, 60 non-trading requests/min
+            _tradingRateGate = new RateGate(40, TimeSpan.FromMinutes(1));
+            _nonTradingRateGate = new RateGate(60, TimeSpan.FromMinutes(1));
         }
 
         #region Authentication
 
         /// <summary>
-        /// Logs in to IG and retrieves session tokens
+        /// Authenticates with IG and stores session tokens.
+        /// Throws if authentication fails.
         /// </summary>
+        /// <param name="identifier">IG username</param>
+        /// <param name="password">IG password</param>
+        /// <returns>Login response with account and connection info</returns>
         public IGLoginResponse Login(string identifier, string password)
         {
-            var request = new
+            var loginRequest = new IGLoginRequest
             {
-                identifier = identifier,
-                password = password
+                Identifier = identifier,
+                Password = password
             };
 
-            var response = SendRequest(HttpMethod.Post, IGApiEndpoints.Session, request, version: 2);
+            var httpResponse = SendRawRequest(HttpMethod.Post, IGApiEndpoints.Session, loginRequest, version: 2);
 
-            // Extract tokens from headers
-            var cst = GetHeader(response, "CST");
-            var securityToken = GetHeader(response, "X-SECURITY-TOKEN");
+            // Extract tokens from response headers
+            Cst = ExtractRequiredHeader(httpResponse, "CST");
+            SecurityToken = ExtractRequiredHeader(httpResponse, "X-SECURITY-TOKEN");
 
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
+            // Set tokens as default headers for all subsequent requests
+            SetDefaultHeader("CST", Cst);
+            SetDefaultHeader("X-SECURITY-TOKEN", SecurityToken);
+
+            var body = httpResponse.Content.ReadAsStringAsync().SynchronouslyAwaitTaskResult();
+            var session = JsonConvert.DeserializeObject<IGSessionResponse>(body);
+
+            LightstreamerEndpoint = session.LightstreamerEndpoint;
 
             return new IGLoginResponse
             {
-                Cst = cst,
-                SecurityToken = securityToken,
-                LightstreamerEndpoint = json["lightstreamerEndpoint"]?.ToString(),
-                AccountId = json["currentAccountId"]?.ToString(),
-                ClientId = json["clientId"]?.ToString()
+                LightstreamerEndpoint = session.LightstreamerEndpoint,
+                AccountId = session.CurrentAccountId,
+                ClientId = session.ClientId
             };
         }
 
         /// <summary>
-        /// Logs out from IG
+        /// Logs out from IG, ending the current session
         /// </summary>
         public void Logout()
         {
             try
             {
-                SendRequest(HttpMethod.Delete, IGApiEndpoints.Session);
+                SendRawRequest(HttpMethod.Delete, IGApiEndpoints.Session);
             }
             catch (Exception ex)
             {
-                Log.Error($"IGRestApiClient.Logout(): Error: {ex.Message}");
+                Log.Error($"IGRestApiClient.Logout(): {ex.Message}");
             }
-        }
-
-        /// <summary>
-        /// Switches to a different account
-        /// </summary>
-        public void SwitchAccount(string accountId)
-        {
-            var request = new { accountId = accountId };
-            SendRequest(HttpMethod.Put, IGApiEndpoints.Session, request);
         }
 
         #endregion
@@ -117,34 +134,14 @@ namespace QuantConnect.Brokerages.IG.Api
         #region Account
 
         /// <summary>
-        /// Gets account information
+        /// Gets account balance information for the configured account
         /// </summary>
-        public List<IGAccount> GetAccounts()
+        /// <returns>Account data for the current account</returns>
+        public IGAccountData GetAccountBalance()
         {
-            var response = SendRequest(HttpMethod.Get, IGApiEndpoints.Accounts);
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
-
-            var accounts = new List<IGAccount>();
-            foreach (var acc in json["accounts"])
-            {
-                accounts.Add(new IGAccount
-                {
-                    AccountId = acc["accountId"]?.ToString(),
-                    AccountName = acc["accountName"]?.ToString(),
-                    AccountType = acc["accountType"]?.ToString(),
-                    Currency = acc["currency"]?.ToString(),
-                    Balance = new IGAccountBalance
-                    {
-                        Available = acc["balance"]?["available"]?.Value<decimal>() ?? 0,
-                        Balance = acc["balance"]?["balance"]?.Value<decimal>() ?? 0,
-                        Deposit = acc["balance"]?["deposit"]?.Value<decimal>() ?? 0,
-                        ProfitLoss = acc["balance"]?["profitLoss"]?.Value<decimal>() ?? 0
-                    }
-                });
-            }
-
-            return accounts;
+            var response = SendRequest<IGAccountsResponse>(HttpMethod.Get, IGApiEndpoints.Accounts);
+            return response.Accounts.FirstOrDefault(a => a.AccountId == _accountId)
+                ?? throw new InvalidOperationException($"Account {_accountId} not found in IG response");
         }
 
         #endregion
@@ -152,31 +149,23 @@ namespace QuantConnect.Brokerages.IG.Api
         #region Positions
 
         /// <summary>
-        /// Gets all open positions
+        /// Gets all open positions for the current session
         /// </summary>
-        public List<IGPosition> GetPositions()
+        /// <returns>Open positions</returns>
+        public IEnumerable<IGPosition> GetPositions()
         {
-            var response = SendRequest(HttpMethod.Get, IGApiEndpoints.Positions);
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
-
-            var positions = new List<IGPosition>();
-            foreach (var pos in json["positions"])
+            var response = SendRequest<IGPositionsResponse>(HttpMethod.Get, IGApiEndpoints.Positions, version: 2);
+            return response.Positions.Select(p => new IGPosition
             {
-                positions.Add(new IGPosition
-                {
-                    DealId = pos["position"]?["dealId"]?.ToString(),
-                    Epic = pos["market"]?["epic"]?.ToString(),
-                    Direction = pos["position"]?["direction"]?.ToString(),
-                    Size = pos["position"]?["size"]?.Value<decimal>() ?? 0,
-                    OpenLevel = pos["position"]?["openLevel"]?.Value<decimal>() ?? 0,
-                    CurrentLevel = pos["market"]?["bid"]?.Value<decimal>() ?? 0,
-                    Currency = pos["position"]?["currency"]?.ToString(),
-                    UnrealizedPnL = pos["position"]?["profit"]?.Value<decimal>() ?? 0
-                });
-            }
-
-            return positions;
+                DealId = p.Position.DealId,
+                Epic = p.Market.Epic,
+                Direction = p.Position.Direction,
+                Size = p.Position.Size,
+                OpenLevel = p.Position.OpenLevel,
+                CurrentLevel = p.Market.Bid ?? 0,
+                Currency = p.Position.Currency,
+                UnrealizedPnL = p.Position.Profit
+            });
         }
 
         #endregion
@@ -184,129 +173,98 @@ namespace QuantConnect.Brokerages.IG.Api
         #region Orders
 
         /// <summary>
-        /// Gets all working orders
+        /// Gets all working (pending) orders
         /// </summary>
-        public List<IGWorkingOrder> GetWorkingOrders()
+        /// <returns>Working orders, empty enumerable if none</returns>
+        public IEnumerable<IGWorkingOrder> GetWorkingOrders()
         {
-            var response = SendRequest(HttpMethod.Get, IGApiEndpoints.WorkingOrders, allowNotFound: true);
-            if (response == null) return new List<IGWorkingOrder>();
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
-
-            var orders = new List<IGWorkingOrder>();
-            foreach (var wo in json["workingOrders"])
+            var response = SendRequest<IGWorkingOrdersResponse>(HttpMethod.Get, IGApiEndpoints.WorkingOrders, version: 2);
+            if (response.WorkingOrders == null)
             {
-                orders.Add(new IGWorkingOrder
-                {
-                    DealId = wo["workingOrderData"]?["dealId"]?.ToString(),
-                    Epic = wo["marketData"]?["epic"]?.ToString(),
-                    Direction = wo["workingOrderData"]?["direction"]?.ToString(),
-                    Size = wo["workingOrderData"]?["size"]?.Value<decimal>() ?? 0,
-                    Level = wo["workingOrderData"]?["level"]?.Value<decimal>() ?? 0,
-                    OrderType = wo["workingOrderData"]?["type"]?.ToString(),
-                    CreatedDate = wo["workingOrderData"]?["createdDate"]?.Value<DateTime>() ?? DateTime.UtcNow
-                });
+                return Enumerable.Empty<IGWorkingOrder>();
             }
 
-            return orders;
+            return response.WorkingOrders.Select(wo => new IGWorkingOrder
+            {
+                DealId = wo.WorkingOrderData.DealId,
+                Epic = wo.MarketData.Epic,
+                Direction = wo.WorkingOrderData.Direction,
+                Size = wo.WorkingOrderData.Size,
+                Level = wo.WorkingOrderData.Level,
+                OrderType = wo.WorkingOrderData.Type,
+                CreatedDate = wo.WorkingOrderData.CreatedDate
+            });
         }
 
         /// <summary>
         /// Places a new order
         /// </summary>
-        public IGOrderResponse PlaceOrder(IGPlaceOrderRequest request)
+        /// <param name="request">Order placement request</param>
+        /// <returns>Deal reference for confirmation polling</returns>
+        public string PlaceOrder(IGPlaceOrderRequest request)
         {
-            var response = SendRequest(HttpMethod.Post, IGApiEndpoints.PositionsOtc, request, version: 2);
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
-
-            return new IGOrderResponse
-            {
-                DealReference = json["dealReference"]?.ToString(),
-                Success = true
-            };
+            var response = SendRequest<IGDealReferenceResponse>(HttpMethod.Post, IGApiEndpoints.PositionsOtc, request, version: 2, isTradingRequest: true);
+            return response.DealReference;
         }
 
         /// <summary>
-        /// Updates an existing order
+        /// Updates an existing working order
         /// </summary>
-        public IGOrderResponse UpdateOrder(IGUpdateOrderRequest request)
+        /// <param name="request">Order update request with DealId set</param>
+        /// <returns>Deal reference for confirmation polling</returns>
+        public string UpdateOrder(IGUpdateOrderRequest request)
         {
-            var response = SendRequest(HttpMethod.Put,
-                $"{IGApiEndpoints.WorkingOrdersOtc}/{request.DealId}", request, version: 2);
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
-
-            return new IGOrderResponse
-            {
-                DealReference = json["dealReference"]?.ToString(),
-                Success = true
-            };
+            var response = SendRequest<IGDealReferenceResponse>(HttpMethod.Put,
+                $"{IGApiEndpoints.WorkingOrders}/{request.DealId}", request, version: 2, isTradingRequest: true);
+            return response.DealReference;
         }
 
         /// <summary>
-        /// Cancels an order
+        /// Cancels a working order
         /// </summary>
-        public IGOrderResponse CancelOrder(string dealId)
+        /// <param name="dealId">Deal ID of the order to cancel</param>
+        /// <returns>Deal reference for confirmation polling</returns>
+        public string CancelOrder(string dealId)
         {
-            var response = SendRequest(HttpMethod.Delete,
-                $"{IGApiEndpoints.WorkingOrdersOtc}/{dealId}");
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
-
-            return new IGOrderResponse
-            {
-                DealReference = json["dealReference"]?.ToString(),
-                Success = true
-            };
+            var response = SendRequest<IGDealReferenceResponse>(HttpMethod.Delete,
+                $"{IGApiEndpoints.WorkingOrders}/{dealId}", isTradingRequest: true);
+            return response.DealReference;
         }
 
         /// <summary>
-        /// Gets the deal confirmation for a deal reference
+        /// Gets deal confirmation for a submitted order
         /// </summary>
-        public JObject GetDealConfirmation(string dealReference)
+        /// <param name="dealReference">Deal reference from order submission</param>
+        /// <returns>Deal confirmation with status, fill price, and fill size</returns>
+        public IGDealConfirmation GetDealConfirmation(string dealReference)
         {
-            var response = SendRequest(HttpMethod.Get, $"{IGApiEndpoints.Confirms}/{dealReference}");
-            var body = GetResponseBody(response);
-            return JObject.Parse(body);
+            return SendRequest<IGDealConfirmation>(HttpMethod.Get, $"{IGApiEndpoints.Confirms}/{dealReference}");
         }
 
         #endregion
 
-        #region Markets
+        #region Market Data
 
         /// <summary>
-        /// Gets market details for a specific EPIC
+        /// Gets detailed market data for a specific instrument
         /// </summary>
-        public JObject GetMarketDetails(string epic)
+        /// <param name="epic">IG EPIC code for the instrument</param>
+        /// <returns>Market details including instrument info, snapshot, and dealing rules</returns>
+        public IGMarketDetailsResponse GetMarketData(string epic)
         {
-            var response = SendRequest(HttpMethod.Get, $"{IGApiEndpoints.Markets}/{epic}", version: 3);
-            var body = GetResponseBody(response);
-            return JObject.Parse(body);
+            return SendRequest<IGMarketDetailsResponse>(HttpMethod.Get, $"{IGApiEndpoints.Markets}/{epic}", version: 3);
         }
 
         /// <summary>
-        /// Searches for markets
+        /// Searches for markets matching a search term
         /// </summary>
-        public List<IGMarket> SearchMarkets(string searchTerm)
+        /// <param name="searchTerm">Search term to match against instrument names</param>
+        /// <returns>Matching markets</returns>
+        public IEnumerable<IGMarketSearchResult> SearchMarkets(string searchTerm)
         {
-            var response = SendRequest(HttpMethod.Get,
+            var response = SendRequest<IGMarketsSearchResponse>(HttpMethod.Get,
                 $"{IGApiEndpoints.MarketSearch}{Uri.EscapeDataString(searchTerm)}");
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
-
-            var markets = new List<IGMarket>();
-            foreach (var mkt in json["markets"])
-            {
-                markets.Add(new IGMarket
-                {
-                    Epic = mkt["epic"]?.ToString(),
-                    InstrumentName = mkt["instrumentName"]?.ToString(),
-                    InstrumentType = mkt["instrumentType"]?.ToString()
-                });
-            }
-
-            return markets;
+            return response.Markets ?? Enumerable.Empty<IGMarketSearchResult>();
         }
 
         #endregion
@@ -314,102 +272,102 @@ namespace QuantConnect.Brokerages.IG.Api
         #region Historical Data
 
         /// <summary>
-        /// Gets historical prices
+        /// Gets historical price candles for an instrument
         /// </summary>
-        public List<IGPriceCandle> GetHistoricalPrices(string epic, string resolution,
+        /// <param name="epic">IG EPIC code</param>
+        /// <param name="resolution">Price resolution (SECOND, MINUTE, HOUR, DAY)</param>
+        /// <param name="startDate">Start of the date range</param>
+        /// <param name="endDate">End of the date range</param>
+        /// <returns>Historical price candles</returns>
+        public IEnumerable<IGPriceCandleData> GetHistoricalPrices(string epic, string resolution,
             DateTime startDate, DateTime endDate)
         {
             var url = $"{IGApiEndpoints.Prices}/{epic}?resolution={resolution}" +
-                      $"&from={startDate:yyyy-MM-ddTHH:mm:ss}&to={endDate:yyyy-MM-ddTHH:mm:ss}";
+                      $"&from={startDate.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)}" +
+                      $"&to={endDate.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)}";
 
-            var response = SendRequest(HttpMethod.Get, url, version: 3);
-            var body = GetResponseBody(response);
-            var json = JObject.Parse(body);
-
-            var prices = new List<IGPriceCandle>();
-            foreach (var p in json["prices"])
-            {
-                prices.Add(new IGPriceCandle
-                {
-                    SnapshotTime = p["snapshotTime"]?.Value<DateTime>() ?? DateTime.UtcNow,
-                    OpenBid = p["openPrice"]?["bid"]?.Value<decimal>() ?? 0,
-                    HighBid = p["highPrice"]?["bid"]?.Value<decimal>() ?? 0,
-                    LowBid = p["lowPrice"]?["bid"]?.Value<decimal>() ?? 0,
-                    CloseBid = p["closePrice"]?["bid"]?.Value<decimal>() ?? 0,
-                    OpenAsk = p["openPrice"]?["ask"]?.Value<decimal>() ?? 0,
-                    HighAsk = p["highPrice"]?["ask"]?.Value<decimal>() ?? 0,
-                    LowAsk = p["lowPrice"]?["ask"]?.Value<decimal>() ?? 0,
-                    CloseAsk = p["closePrice"]?["ask"]?.Value<decimal>() ?? 0,
-                    Volume = p["lastTradedVolume"]?.Value<long>()
-                });
-            }
-
-            return prices;
+            var response = SendRequest<IGPricesResponse>(HttpMethod.Get, url, version: 3);
+            return response.Prices ?? Enumerable.Empty<IGPriceCandleData>();
         }
 
         #endregion
 
-        #region HTTP Helpers
+        #region HTTP Infrastructure
 
-        private HttpResponseMessage SendRequest(HttpMethod method, string endpoint,
-            object body = null, int version = 1, bool allowNotFound = false)
+        /// <summary>
+        /// Sends a request and deserializes the response to the specified type
+        /// </summary>
+        private T SendRequest<T>(HttpMethod method, string endpoint, object body = null,
+            int version = 1, bool isTradingRequest = false)
         {
+            var response = SendRawRequest(method, endpoint, body, version, isTradingRequest);
+            var responseBody = response.Content.ReadAsStringAsync().SynchronouslyAwaitTaskResult();
+            return JsonConvert.DeserializeObject<T>(responseBody);
+        }
+
+        /// <summary>
+        /// Sends an HTTP request with rate limiting and returns the raw response.
+        /// Throws on non-success status codes.
+        /// </summary>
+        private HttpResponseMessage SendRawRequest(HttpMethod method, string endpoint,
+            object body = null, int version = 1, bool isTradingRequest = false)
+        {
+            // Apply rate limiting
+            var rateGate = isTradingRequest ? _tradingRateGate : _nonTradingRateGate;
+            rateGate.WaitToProceed();
+
             var request = new HttpRequestMessage(method, _baseUrl + endpoint);
+            request.Headers.Add("VERSION", version.ToString(CultureInfo.InvariantCulture));
 
-            // Add version header
-            request.Headers.Add("VERSION", version.ToString());
-
-            // Add session tokens if available
-            if (!string.IsNullOrEmpty(_cst))
-            {
-                request.Headers.Add("CST", _cst);
-            }
-            if (!string.IsNullOrEmpty(_securityToken))
-            {
-                request.Headers.Add("X-SECURITY-TOKEN", _securityToken);
-            }
-
-            // Add body if present
             if (body != null)
             {
                 var json = JsonConvert.SerializeObject(body);
                 request.Content = new StringContent(json, Encoding.UTF8, "application/json");
             }
 
-            var response = _httpClient.SendAsync(request).GetAwaiter().GetResult();
+            var response = _httpClient.SendAsync(request).SynchronouslyAwaitTaskResult();
 
             if (!response.IsSuccessStatusCode)
             {
-                if (allowNotFound && response.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    return null;
-                }
-                var errorBody = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var errorBody = response.Content.ReadAsStringAsync().SynchronouslyAwaitTaskResult();
                 throw new Exception($"IG API Error: {response.StatusCode} - {errorBody}");
             }
 
             return response;
         }
 
-        private string GetHeader(HttpResponseMessage response, string headerName)
+        /// <summary>
+        /// Extracts a required header value from the response, throwing if missing
+        /// </summary>
+        private static string ExtractRequiredHeader(HttpResponseMessage response, string headerName)
         {
-            if (response.Headers.TryGetValues(headerName, out var values))
+            if (!response.Headers.TryGetValues(headerName, out var values))
             {
-                return string.Join("", values);
+                throw new InvalidOperationException(
+                    $"IG login failed: missing '{headerName}' header. Check your credentials and API key.");
             }
-            return null;
+            return string.Join("", values);
         }
 
-        private string GetResponseBody(HttpResponseMessage response)
+        /// <summary>
+        /// Sets or replaces a default header on the HTTP client
+        /// </summary>
+        private void SetDefaultHeader(string name, string value)
         {
-            return response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            _httpClient.DefaultRequestHeaders.Remove(name);
+            _httpClient.DefaultRequestHeaders.Add(name, value);
         }
 
         #endregion
 
+        /// <summary>
+        /// Disposes HTTP client and rate gates
+        /// </summary>
         public void Dispose()
         {
             _httpClient?.Dispose();
+            _tradingRateGate?.Dispose();
+            _nonTradingRateGate?.Dispose();
         }
     }
 }

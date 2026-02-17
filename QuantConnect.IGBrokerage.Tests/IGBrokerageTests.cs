@@ -1,6 +1,6 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
- * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2026 QuantConnect Corporation.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,35 +51,20 @@ namespace QuantConnect.Brokerages.IG.Tests
 
         protected override IBrokerage CreateBrokerage(IOrderProvider orderProvider, ISecurityProvider securityProvider)
         {
-            // Get configuration from config.json
             var apiUrl = Config.Get("ig-api-url", "https://demo-api.ig.com/gateway/deal");
             var apiKey = Config.Get("ig-api-key");
-            var identifier = Config.Get("ig-identifier");
+            var username = Config.Get("ig-username");
             var password = Config.Get("ig-password");
             var accountId = Config.Get("ig-account-id");
-            var environment = Config.Get("ig-environment", "demo");
 
-            if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(identifier) || string.IsNullOrEmpty(password))
+            if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
             {
                 Assert.Ignore("IGBrokerageTests: Credentials not configured in config.json");
             }
 
-            // Create brokerage instance
-            var brokerage = new IGBrokerage(
-                apiUrl,
-                apiKey,
-                identifier,
-                password,
-                accountId,
-                environment,
-                orderProvider,
-                securityProvider
-            );
+            var brokerage = new IGBrokerage(apiUrl, username, password, apiKey, accountId, null);
 
-            // Connect to IG
             brokerage.Connect();
-
-            // Wait for connection
             Thread.Sleep(2000);
 
             if (!brokerage.IsConnected)
@@ -92,44 +77,20 @@ namespace QuantConnect.Brokerages.IG.Tests
 
         protected override bool IsAsync()
         {
-            // IG uses Lightstreamer for real-time updates
-            // Order events come asynchronously via WebSocket
             return true;
         }
 
         protected override decimal GetAskPrice(Symbol symbol)
         {
-            // Get current market data for the symbol
             var brokerage = (IGBrokerage)Brokerage;
-            var epic = brokerage.SymbolMapper.GetBrokerageSymbol(symbol);
-
-            if (string.IsNullOrEmpty(epic))
-            {
-                Assert.Fail($"Cannot map symbol {symbol} to IG EPIC");
-            }
-
-            try
-            {
-                // Use IG REST API to get current prices
-                var marketData = brokerage.GetMarketData(epic);
-
-                // Return offer (ask) price
-                return marketData.Offer;
-            }
-            catch (Exception ex)
-            {
-                Assert.Fail($"Failed to get ask price for {symbol}: {ex.Message}");
-                return 0; // Never reached
-            }
+            return brokerage.GetCurrentAskPrice(symbol);
         }
-
 
         /// <summary>
         /// Provides the data required to test each order type in various cases
         /// </summary>
         private static IEnumerable<TestCaseData> OrderParameters()
         {
-            // Use forex pairs that IG definitely supports
             var eurusd = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
             yield return new TestCaseData(new MarketOrderTestParameters(eurusd));
             yield return new TestCaseData(new LimitOrderTestParameters(eurusd, 1.1500m, 1.0500m));
@@ -138,7 +99,6 @@ namespace QuantConnect.Brokerages.IG.Tests
             var gbpusd = Symbol.Create("GBPUSD", SecurityType.Forex, Market.IG);
             yield return new TestCaseData(new StopLimitOrderTestParameters(gbpusd, 1.3500m, 1.2500m));
 
-            // IG supports indices
             var spx = Symbol.Create("SPX", SecurityType.Index, Market.IG);
             yield return new TestCaseData(new MarketOrderTestParameters(spx));
         }
