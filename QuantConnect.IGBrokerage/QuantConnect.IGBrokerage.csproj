@@ -23,16 +23,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Lightstreamer.DotNetStandard.Client" Version="6.2.1" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
-  </ItemGroup>
-  <!-- TODO: Switch to NuGet PackageReferences once Market.IG and IGBrokerageModel are merged upstream
-  <ItemGroup>
     <PackageReference Include="QuantConnect.Brokerages" Version="2.5.*" />
-    <PackageReference Include="QuantConnect.Common" Version="2.5.*" />
-  </ItemGroup>
-  -->
-  <ItemGroup>
-    <ProjectReference Include="..\..\Lean\Brokerages\QuantConnect.Brokerages.csproj" />
-    <ProjectReference Include="..\..\Lean\Common\QuantConnect.csproj" />
   </ItemGroup>
 </Project>

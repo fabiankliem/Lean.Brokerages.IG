@@ -176,12 +176,8 @@ namespace QuantConnect.Brokerages.IG
             var loginResponse = _restClient.Login(_identifier, _password);
             Log.Trace($"IGBrokerage.Connect(): Authenticated. Account: {loginResponse.AccountId}");
 
-            // Initialize and connect Lightstreamer
-            _streamingClient = new IGLightstreamerClient(
-                _restClient.LightstreamerEndpoint,
-                _restClient.Cst,
-                _restClient.SecurityToken,
-                _accountId);
+            // Create streaming client via REST client factory (tokens are private to REST client)
+            _streamingClient = _restClient.CreateStreamingClient(_accountId);
 
             _streamingClient.OnPriceUpdate += HandlePriceUpdate;
             _streamingClient.OnTradeUpdate += HandleTradeUpdate;
@@ -225,12 +221,6 @@ namespace QuantConnect.Brokerages.IG
 
             if (_streamingClient != null)
             {
-                _streamingClient.OnPriceUpdate -= HandlePriceUpdate;
-                _streamingClient.OnTradeUpdate -= HandleTradeUpdate;
-                _streamingClient.OnAccountUpdate -= HandleAccountUpdate;
-                _streamingClient.OnError -= HandleStreamingError;
-                _streamingClient.OnDisconnect -= HandleStreamingDisconnect;
-
                 _streamingClient.Disconnect();
                 _streamingClient.Dispose();
                 _streamingClient = null;
@@ -268,7 +258,7 @@ namespace QuantConnect.Brokerages.IG
 
             foreach (var wo in workingOrders)
             {
-                var symbol = _symbolMapper.GetLeanSymbol(wo.Epic, SecurityType.Forex, Market.IG);
+                var symbol = _symbolMapper.GetLeanSymbol(wo.Epic, SecurityType.Forex, IGSymbolMapper.MarketName);
                 if (symbol == null)
                 {
                     Log.Trace($"IGBrokerage.GetOpenOrders(): Unable to map EPIC {wo.Epic}");
@@ -315,7 +305,7 @@ namespace QuantConnect.Brokerages.IG
 
             foreach (var position in positions)
             {
-                var symbol = _symbolMapper.GetLeanSymbol(position.Epic, SecurityType.Forex, Market.IG);
+                var symbol = _symbolMapper.GetLeanSymbol(position.Epic, SecurityType.Forex, IGSymbolMapper.MarketName);
                 if (symbol == null)
                 {
                     Log.Trace($"IGBrokerage.GetAccountHoldings(): Unable to map EPIC {position.Epic}");
@@ -667,7 +657,7 @@ namespace QuantConnect.Brokerages.IG
             foreach (var market in markets)
             {
                 var securityType = MapInstrumentType(market.InstrumentType);
-                var leanSymbol = _symbolMapper.GetLeanSymbol(market.Epic, securityType, Market.IG);
+                var leanSymbol = _symbolMapper.GetLeanSymbol(market.Epic, securityType, IGSymbolMapper.MarketName);
 
                 if (leanSymbol != null)
                 {
@@ -676,7 +666,7 @@ namespace QuantConnect.Brokerages.IG
                 else
                 {
                     var ticker = market.InstrumentName?.Replace(" ", "") ?? market.Epic;
-                    symbols.Add(Symbol.Create(ticker, securityType, Market.IG));
+                    symbols.Add(Symbol.Create(ticker, securityType, IGSymbolMapper.MarketName));
                 }
             }
 
@@ -728,19 +718,21 @@ namespace QuantConnect.Brokerages.IG
         /// </summary>
         private bool Subscribe(IEnumerable<Symbol> symbols)
         {
+            if (_streamingClient == null || !_streamingClient.IsConnected)
+            {
+                throw new InvalidOperationException(
+                    "IGBrokerage.Subscribe(): Cannot subscribe - streaming connection is not available. " +
+                    "Ensure Connect() has been called and streaming is active.");
+            }
+
             foreach (var symbol in symbols)
             {
                 var epic = _symbolMapper.GetBrokerageSymbol(symbol);
                 if (!string.IsNullOrEmpty(epic))
                 {
                     _subscribedEpics[symbol] = epic;
-
-                    if (_restClient != null)
-                    {
-                        GetInstrumentConversion(epic);
-                    }
-
-                    _streamingClient?.SubscribeToPrices(epic);
+                    GetInstrumentConversion(epic);
+                    _streamingClient.SubscribeToPrices(epic);
                     Log.Trace($"IGBrokerage.Subscribe(): Subscribed to {symbol} (EPIC: {epic})");
                 }
             }
@@ -960,11 +952,7 @@ namespace QuantConnect.Brokerages.IG
                         try
                         {
                             _streamingClient?.Dispose();
-                            _streamingClient = new IGLightstreamerClient(
-                                _restClient.LightstreamerEndpoint,
-                                _restClient.Cst,
-                                _restClient.SecurityToken,
-                                _accountId);
+                            _streamingClient = _restClient.CreateStreamingClient(_accountId);
 
                             _streamingClient.OnPriceUpdate += HandlePriceUpdate;
                             _streamingClient.OnTradeUpdate += HandleTradeUpdate;

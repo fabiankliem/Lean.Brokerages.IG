@@ -38,20 +38,9 @@ namespace QuantConnect.Brokerages.IG.Api
         private readonly RateGate _tradingRateGate;
         private readonly RateGate _nonTradingRateGate;
 
-        /// <summary>
-        /// CST session token, set during Login. Internal for Lightstreamer access.
-        /// </summary>
-        internal string Cst { get; private set; }
-
-        /// <summary>
-        /// Security token, set during Login. Internal for Lightstreamer access.
-        /// </summary>
-        internal string SecurityToken { get; private set; }
-
-        /// <summary>
-        /// Lightstreamer endpoint URL, set during Login. Internal for streaming client access.
-        /// </summary>
-        internal string LightstreamerEndpoint { get; private set; }
+        private string _cst;
+        private string _securityToken;
+        private string _lightstreamerEndpoint;
 
         /// <summary>
         /// Creates a new IG REST API client
@@ -94,21 +83,21 @@ namespace QuantConnect.Brokerages.IG.Api
             var httpResponse = SendRawRequest(HttpMethod.Post, IGApiEndpoints.Session, loginRequest, version: 2);
 
             // Extract tokens from response headers
-            Cst = ExtractRequiredHeader(httpResponse, "CST");
-            SecurityToken = ExtractRequiredHeader(httpResponse, "X-SECURITY-TOKEN");
+            _cst = ExtractRequiredHeader(httpResponse, "CST");
+            _securityToken = ExtractRequiredHeader(httpResponse, "X-SECURITY-TOKEN");
 
             // Set tokens as default headers for all subsequent requests
-            SetDefaultHeader("CST", Cst);
-            SetDefaultHeader("X-SECURITY-TOKEN", SecurityToken);
+            SetDefaultHeader("CST", _cst);
+            SetDefaultHeader("X-SECURITY-TOKEN", _securityToken);
 
-            var body = httpResponse.Content.ReadAsStringAsync().SynchronouslyAwaitTaskResult();
+            var body = ReadResponseBody(httpResponse);
             var session = JsonConvert.DeserializeObject<IGSessionResponse>(body);
 
-            LightstreamerEndpoint = session.LightstreamerEndpoint;
+            _lightstreamerEndpoint = session.LightstreamerEndpoint;
 
             return new IGLoginResponse
             {
-                LightstreamerEndpoint = session.LightstreamerEndpoint,
+                LightstreamerEndpoint = _lightstreamerEndpoint,
                 AccountId = session.CurrentAccountId,
                 ClientId = session.ClientId
             };
@@ -127,6 +116,23 @@ namespace QuantConnect.Brokerages.IG.Api
             {
                 Log.Error($"IGRestApiClient.Logout(): {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Creates a new Lightstreamer streaming client using the session tokens from Login.
+        /// Must be called after Login() has been called successfully.
+        /// </summary>
+        /// <param name="accountId">IG account identifier for trade/account subscriptions</param>
+        /// <returns>A configured and ready-to-connect streaming client</returns>
+        public IGLightstreamerClient CreateStreamingClient(string accountId)
+        {
+            if (string.IsNullOrEmpty(_cst) || string.IsNullOrEmpty(_securityToken))
+            {
+                throw new InvalidOperationException(
+                    "Cannot create streaming client before login. Call Login() first.");
+            }
+
+            return new IGLightstreamerClient(_lightstreamerEndpoint, _cst, _securityToken, accountId);
         }
 
         #endregion
@@ -155,17 +161,21 @@ namespace QuantConnect.Brokerages.IG.Api
         public IEnumerable<IGPosition> GetPositions()
         {
             var response = SendRequest<IGPositionsResponse>(HttpMethod.Get, IGApiEndpoints.Positions, version: 2);
-            return response.Positions.Select(p => new IGPosition
+
+            foreach (var p in response.Positions)
             {
-                DealId = p.Position.DealId,
-                Epic = p.Market.Epic,
-                Direction = p.Position.Direction,
-                Size = p.Position.Size,
-                OpenLevel = p.Position.OpenLevel,
-                CurrentLevel = p.Market.Bid ?? 0,
-                Currency = p.Position.Currency,
-                UnrealizedPnL = p.Position.Profit
-            });
+                yield return new IGPosition
+                {
+                    DealId = p.Position.DealId,
+                    Epic = p.Market.Epic,
+                    Direction = p.Position.Direction,
+                    Size = p.Position.Size,
+                    OpenLevel = p.Position.OpenLevel,
+                    CurrentLevel = p.Market.Bid ?? 0,
+                    Currency = p.Position.Currency,
+                    UnrealizedPnL = p.Position.Profit
+                };
+            }
         }
 
         #endregion
@@ -301,7 +311,7 @@ namespace QuantConnect.Brokerages.IG.Api
             int version = 1, bool isTradingRequest = false)
         {
             var response = SendRawRequest(method, endpoint, body, version, isTradingRequest);
-            var responseBody = response.Content.ReadAsStringAsync().SynchronouslyAwaitTaskResult();
+            var responseBody = ReadResponseBody(response);
             return JsonConvert.DeserializeObject<T>(responseBody);
         }
 
@@ -329,11 +339,19 @@ namespace QuantConnect.Brokerages.IG.Api
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = response.Content.ReadAsStringAsync().SynchronouslyAwaitTaskResult();
+                var errorBody = ReadResponseBody(response);
                 throw new Exception($"IG API Error: {response.StatusCode} - {errorBody}");
             }
 
             return response;
+        }
+
+        /// <summary>
+        /// Reads the response body as a string
+        /// </summary>
+        private static string ReadResponseBody(HttpResponseMessage response)
+        {
+            return response.Content.ReadAsStringAsync().SynchronouslyAwaitTaskResult();
         }
 
         /// <summary>

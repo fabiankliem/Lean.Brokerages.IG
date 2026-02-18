@@ -13,6 +13,7 @@
  * limitations under the License.
 */
 
+using NodaTime;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
@@ -71,15 +72,13 @@ namespace QuantConnect.Brokerages.IG
             }
 
             var resolution = ConvertResolution(request.Resolution);
-            if (resolution == null)
-            {
-                return null;
-            }
 
-            return GetHistoryInternal(request, epic, resolution);
+            return request.TickType == TickType.Quote
+                ? GetQuoteBars(request, epic, resolution)
+                : GetTradeBars(request, epic, resolution);
         }
 
-        private IEnumerable<BaseData> GetHistoryInternal(HistoryRequest request, string epic, string resolution)
+        private IEnumerable<BaseData> GetQuoteBars(HistoryRequest request, string epic, string resolution)
         {
             IEnumerable<Models.IGPriceCandleData> prices;
             try
@@ -94,64 +93,69 @@ namespace QuantConnect.Brokerages.IG
 
             var (pipValue, _) = GetInstrumentConversion(epic);
             var period = request.Resolution.ToTimeSpan();
+            var timeZone = request.ExchangeHours.TimeZone;
 
-            foreach (var price in prices)
+            foreach (var candle in prices)
             {
-                if (request.TickType == TickType.Quote)
+                yield return new QuoteBar
                 {
-                    yield return GetQuoteBar(price, request.Symbol, pipValue, period);
-                }
-                else
-                {
-                    yield return GetTradeBar(price, request.Symbol, pipValue, period);
-                }
+                    Symbol = request.Symbol,
+                    Time = candle.SnapshotTime.ConvertFromUtc(timeZone),
+                    Bid = new Bar(
+                        (candle.OpenPrice?.Bid ?? 0) * pipValue,
+                        (candle.HighPrice?.Bid ?? 0) * pipValue,
+                        (candle.LowPrice?.Bid ?? 0) * pipValue,
+                        (candle.ClosePrice?.Bid ?? 0) * pipValue),
+                    Ask = new Bar(
+                        (candle.OpenPrice?.Ask ?? 0) * pipValue,
+                        (candle.HighPrice?.Ask ?? 0) * pipValue,
+                        (candle.LowPrice?.Ask ?? 0) * pipValue,
+                        (candle.ClosePrice?.Ask ?? 0) * pipValue),
+                    Period = period
+                };
             }
         }
 
-        private static QuoteBar GetQuoteBar(Models.IGPriceCandleData candle, Symbol symbol,
-            decimal pipValue, TimeSpan period)
+        private IEnumerable<BaseData> GetTradeBars(HistoryRequest request, string epic, string resolution)
         {
-            return new QuoteBar
+            IEnumerable<Models.IGPriceCandleData> prices;
+            try
             {
-                Symbol = symbol,
-                Time = candle.SnapshotTime,
-                Bid = new Bar(
-                    (candle.OpenPrice?.Bid ?? 0) * pipValue,
-                    (candle.HighPrice?.Bid ?? 0) * pipValue,
-                    (candle.LowPrice?.Bid ?? 0) * pipValue,
-                    (candle.ClosePrice?.Bid ?? 0) * pipValue),
-                Ask = new Bar(
-                    (candle.OpenPrice?.Ask ?? 0) * pipValue,
-                    (candle.HighPrice?.Ask ?? 0) * pipValue,
-                    (candle.LowPrice?.Ask ?? 0) * pipValue,
-                    (candle.ClosePrice?.Ask ?? 0) * pipValue),
-                Period = period
-            };
-        }
-
-        private static TradeBar GetTradeBar(Models.IGPriceCandleData candle, Symbol symbol,
-            decimal pipValue, TimeSpan period)
-        {
-            var openBid = candle.OpenPrice?.Bid ?? 0;
-            var openAsk = candle.OpenPrice?.Ask ?? 0;
-            var highBid = candle.HighPrice?.Bid ?? 0;
-            var highAsk = candle.HighPrice?.Ask ?? 0;
-            var lowBid = candle.LowPrice?.Bid ?? 0;
-            var lowAsk = candle.LowPrice?.Ask ?? 0;
-            var closeBid = candle.ClosePrice?.Bid ?? 0;
-            var closeAsk = candle.ClosePrice?.Ask ?? 0;
-
-            return new TradeBar
+                prices = _restClient.GetHistoricalPrices(epic, resolution, request.StartTimeUtc, request.EndTimeUtc);
+            }
+            catch (Exception ex)
             {
-                Symbol = symbol,
-                Time = candle.SnapshotTime,
-                Open = (openBid + openAsk) / 2 * pipValue,
-                High = (highBid + highAsk) / 2 * pipValue,
-                Low = (lowBid + lowAsk) / 2 * pipValue,
-                Close = (closeBid + closeAsk) / 2 * pipValue,
-                Volume = candle.LastTradedVolume ?? 0,
-                Period = period
-            };
+                Log.Error($"IGBrokerage.GetHistory(): Error fetching {epic}: {ex.Message}");
+                yield break;
+            }
+
+            var (pipValue, _) = GetInstrumentConversion(epic);
+            var period = request.Resolution.ToTimeSpan();
+            var timeZone = request.ExchangeHours.TimeZone;
+
+            foreach (var candle in prices)
+            {
+                var openBid = candle.OpenPrice?.Bid ?? 0;
+                var openAsk = candle.OpenPrice?.Ask ?? 0;
+                var highBid = candle.HighPrice?.Bid ?? 0;
+                var highAsk = candle.HighPrice?.Ask ?? 0;
+                var lowBid = candle.LowPrice?.Bid ?? 0;
+                var lowAsk = candle.LowPrice?.Ask ?? 0;
+                var closeBid = candle.ClosePrice?.Bid ?? 0;
+                var closeAsk = candle.ClosePrice?.Ask ?? 0;
+
+                yield return new TradeBar
+                {
+                    Symbol = request.Symbol,
+                    Time = candle.SnapshotTime.ConvertFromUtc(timeZone),
+                    Open = (openBid + openAsk) / 2 * pipValue,
+                    High = (highBid + highAsk) / 2 * pipValue,
+                    Low = (lowBid + lowAsk) / 2 * pipValue,
+                    Close = (closeBid + closeAsk) / 2 * pipValue,
+                    Volume = candle.LastTradedVolume ?? 0,
+                    Period = period
+                };
+            }
         }
 
         private static string ConvertResolution(Resolution resolution)
@@ -162,7 +166,7 @@ namespace QuantConnect.Brokerages.IG
                 Resolution.Minute => "MINUTE",
                 Resolution.Hour => "HOUR",
                 Resolution.Daily => "DAY",
-                _ => null
+                _ => throw new NotSupportedException($"Resolution {resolution} is not supported by IG Markets")
             };
         }
     }

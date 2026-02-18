@@ -39,38 +39,38 @@ namespace QuantConnect.Brokerages.IG.Tests
                 return
                 [
                     new TestCaseData(
-                        Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
+                        Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName),
                         Resolution.Minute, TimeSpan.FromHours(2),
                         TickType.Quote, typeof(QuoteBar), false),
 
                     new TestCaseData(
-                        Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
+                        Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName),
                         Resolution.Hour, TimeSpan.FromDays(5),
                         TickType.Quote, typeof(QuoteBar), false),
 
                     new TestCaseData(
-                        Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
+                        Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName),
                         Resolution.Daily, TimeSpan.FromDays(30),
                         TickType.Quote, typeof(QuoteBar), false),
 
                     new TestCaseData(
-                        Symbol.Create("GBPUSD", SecurityType.Forex, Market.IG),
+                        Symbol.Create("GBPUSD", SecurityType.Forex, IGSymbolMapper.MarketName),
                         Resolution.Minute, TimeSpan.FromHours(2),
                         TickType.Trade, typeof(TradeBar), false),
 
                     new TestCaseData(
-                        Symbol.Create("SPX", SecurityType.Index, Market.IG),
+                        Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName),
                         Resolution.Hour, TimeSpan.FromDays(3),
                         TickType.Trade, typeof(TradeBar), false),
 
                     new TestCaseData(
-                        Symbol.Create("FTSE", SecurityType.Index, Market.IG),
+                        Symbol.Create("FTSE", SecurityType.Index, IGSymbolMapper.MarketName),
                         Resolution.Daily, TimeSpan.FromDays(30),
                         TickType.Trade, typeof(TradeBar), false),
 
                     // Invalid: Tick resolution not supported
                     new TestCaseData(
-                        Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
+                        Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName),
                         Resolution.Tick, TimeSpan.FromMinutes(5),
                         TickType.Quote, typeof(Tick), true),
 
@@ -82,7 +82,7 @@ namespace QuantConnect.Brokerages.IG.Tests
 
                     // Invalid: OpenInterest not supported
                     new TestCaseData(
-                        Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
+                        Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName),
                         Resolution.Daily, TimeSpan.FromDays(10),
                         TickType.OpenInterest, typeof(TradeBar), true),
                 ];

@@ -33,6 +33,11 @@ namespace QuantConnect.Brokerages.IG
     public class IGSymbolMapper : ISymbolMapper
     {
         /// <summary>
+        /// IG Markets market identifier name, used with <see cref="Market.Add"/>
+        /// </summary>
+        public const string MarketName = "ig";
+
+        /// <summary>
         /// Security types supported by IG Markets brokerage
         /// </summary>
         public static readonly FrozenSet<SecurityType> SupportedSecurityTypes = new HashSet<SecurityType>
@@ -388,6 +393,13 @@ namespace QuantConnect.Brokerages.IG
 
         static IGSymbolMapper()
         {
+            // Register IG market at runtime so it's available for Symbol creation
+            // Skip if already registered (e.g., when linked against a Lean fork that includes Market.IG)
+            if (Market.Encode(MarketName) == null)
+            {
+                Market.Add(MarketName, 43);
+            }
+
             EpicToSymbolMap = new Dictionary<string, (string, SecurityType)>(StringComparer.OrdinalIgnoreCase);
 
             // Use TryAdd so the first (primary) mapping wins over aliases

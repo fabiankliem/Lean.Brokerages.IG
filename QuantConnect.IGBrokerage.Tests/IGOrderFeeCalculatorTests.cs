@@ -30,7 +30,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("EURUSD", SecurityType.Forex, Market.IG),
+                Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName),
                 1000,
                 DateTime.UtcNow
             );
@@ -48,7 +48,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("GBPUSD", SecurityType.Forex, Market.IG),
+                Symbol.Create("GBPUSD", SecurityType.Forex, IGSymbolMapper.MarketName),
                 100000,
                 DateTime.UtcNow
             );
@@ -69,7 +69,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("SPX", SecurityType.Index, Market.IG),
+                Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName),
                 1,
                 DateTime.UtcNow
             );
@@ -87,7 +87,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("SPX", SecurityType.Index, Market.IG),
+                Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName),
                 100,
                 DateTime.UtcNow
             );
@@ -105,7 +105,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange - Calculate exact minimum threshold: 10 / 0.001 = 10000
             var order = new MarketOrder(
-                Symbol.Create("FTSE", SecurityType.Index, Market.IG),
+                Symbol.Create("FTSE", SecurityType.Index, IGSymbolMapper.MarketName),
                 1,
                 DateTime.UtcNow
             );
@@ -126,7 +126,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("GOLD", SecurityType.Cfd, Market.IG),
+                Symbol.Create("GOLD", SecurityType.Cfd, IGSymbolMapper.MarketName),
                 10,
                 DateTime.UtcNow
             );
@@ -144,7 +144,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("OIL", SecurityType.Cfd, Market.IG),
+                Symbol.Create("OIL", SecurityType.Cfd, IGSymbolMapper.MarketName),
                 1,
                 DateTime.UtcNow
             );
@@ -165,7 +165,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("AAPL", SecurityType.Equity, Market.IG),
+                Symbol.Create("AAPL", SecurityType.Equity, IGSymbolMapper.MarketName),
                 50,
                 DateTime.UtcNow
             );
@@ -182,7 +182,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("MSFT", SecurityType.Equity, Market.IG),
+                Symbol.Create("MSFT", SecurityType.Equity, IGSymbolMapper.MarketName),
                 500,
                 DateTime.UtcNow
             );
@@ -203,7 +203,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("BTCUSD", SecurityType.Crypto, Market.IG),
+                Symbol.Create("BTCUSD", SecurityType.Crypto, IGSymbolMapper.MarketName),
                 0.5m,
                 DateTime.UtcNow
             );
@@ -224,7 +224,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("SPX", SecurityType.Index, Market.IG),
+                Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName),
                 100,
                 DateTime.UtcNow
             );
@@ -249,7 +249,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("SPX", SecurityType.Index, Market.IG),
+                Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName),
                 100,
                 DateTime.UtcNow
             );
@@ -273,7 +273,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("SPX", SecurityType.Index, Market.IG),
+                Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName),
                 100,
                 DateTime.UtcNow
             );
@@ -311,7 +311,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("SPX", SecurityType.Index, Market.IG),
+                Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName),
                 0,
                 DateTime.UtcNow
             );
@@ -328,7 +328,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Arrange
             var order = new MarketOrder(
-                Symbol.Create("SPX", SecurityType.Index, Market.IG),
+                Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName),
                 -100, // Short
                 DateTime.UtcNow
             );

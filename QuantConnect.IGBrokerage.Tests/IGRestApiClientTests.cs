@@ -28,14 +28,23 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             var client = CreateAuthenticatedClient();
 
-            // Verify tokens are set on the client
-            Assert.IsNotNull(client.Cst, "CST token should not be null");
-            Assert.IsNotNull(client.SecurityToken, "Security token should not be null");
-            Assert.IsNotNull(client.LightstreamerEndpoint, "Lightstreamer endpoint should not be null");
-            Assert.IsFalse(string.IsNullOrEmpty(client.Cst), "CST token should not be empty");
-            Assert.IsFalse(string.IsNullOrEmpty(client.SecurityToken), "Security token should not be empty");
-            Assert.IsTrue(client.LightstreamerEndpoint.StartsWith("https://"),
+            // Verify login succeeded by checking we can create a streaming client
+            // (tokens are private; this validates they were set correctly)
+            var loginResponse = client.Login(
+                Config.Get("ig-username"),
+                Config.Get("ig-password"));
+
+            Assert.IsNotNull(loginResponse, "Login response should not be null");
+            Assert.IsNotNull(loginResponse.LightstreamerEndpoint, "Lightstreamer endpoint should not be null");
+            Assert.IsTrue(loginResponse.LightstreamerEndpoint.StartsWith("https://"),
                 "Lightstreamer endpoint should be HTTPS URL");
+
+            // Verify CreateStreamingClient works (proves CST and SecurityToken are set)
+            Assert.DoesNotThrow(() =>
+            {
+                var streamingClient = client.CreateStreamingClient("test-account");
+                streamingClient.Dispose();
+            }, "CreateStreamingClient should work after successful login");
         }
 
         [Test]

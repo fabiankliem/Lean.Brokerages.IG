@@ -33,42 +33,42 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectLeanSymbol_Forex()
         {
             // Test EURUSD mapping
-            var leanSymbol = _symbolMapper.GetLeanSymbol("CS.D.EURUSD.MINI.IP", SecurityType.Forex, Market.IG);
+            var leanSymbol = _symbolMapper.GetLeanSymbol("CS.D.EURUSD.MINI.IP", SecurityType.Forex, IGSymbolMapper.MarketName);
 
             Assert.IsNotNull(leanSymbol);
             Assert.AreEqual("EURUSD", leanSymbol.Value);
             Assert.AreEqual(SecurityType.Forex, leanSymbol.SecurityType);
-            Assert.AreEqual(Market.IG, leanSymbol.ID.Market);
+            Assert.AreEqual(IGSymbolMapper.MarketName, leanSymbol.ID.Market);
         }
 
         [Test]
         public void ReturnsCorrectLeanSymbol_Index()
         {
             // Test FTSE 100 mapping
-            var leanSymbol = _symbolMapper.GetLeanSymbol("IX.D.FTSE.DAILY.IP", SecurityType.Index, Market.IG);
+            var leanSymbol = _symbolMapper.GetLeanSymbol("IX.D.FTSE.DAILY.IP", SecurityType.Index, IGSymbolMapper.MarketName);
 
             Assert.IsNotNull(leanSymbol);
             Assert.AreEqual("FTSE", leanSymbol.Value);
             Assert.AreEqual(SecurityType.Index, leanSymbol.SecurityType);
-            Assert.AreEqual(Market.IG, leanSymbol.ID.Market);
+            Assert.AreEqual(IGSymbolMapper.MarketName, leanSymbol.ID.Market);
         }
 
         [Test]
         public void ReturnsCorrectLeanSymbol_Crypto()
         {
             // Test Bitcoin mapping
-            var leanSymbol = _symbolMapper.GetLeanSymbol("CS.D.BITCOIN.CFD.IP", SecurityType.Crypto, Market.IG);
+            var leanSymbol = _symbolMapper.GetLeanSymbol("CS.D.BITCOIN.CFD.IP", SecurityType.Crypto, IGSymbolMapper.MarketName);
 
             Assert.IsNotNull(leanSymbol);
             Assert.AreEqual("BTCUSD", leanSymbol.Value);
             Assert.AreEqual(SecurityType.Crypto, leanSymbol.SecurityType);
-            Assert.AreEqual(Market.IG, leanSymbol.ID.Market);
+            Assert.AreEqual(IGSymbolMapper.MarketName, leanSymbol.ID.Market);
         }
 
         [Test]
         public void ReturnsCorrectBrokerageSymbol_Forex()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CS.D.EURUSD.MINI.IP", brokerageSymbol);
@@ -77,7 +77,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void ReturnsCorrectBrokerageSymbol_Index()
         {
-            var symbol = Symbol.Create("FTSE", SecurityType.Index, Market.IG);
+            var symbol = Symbol.Create("FTSE", SecurityType.Index, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("IX.D.FTSE.DAILY.IP", brokerageSymbol);
@@ -86,7 +86,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void ReturnsCorrectBrokerageSymbol_Crypto()
         {
-            var symbol = Symbol.Create("BTCUSD", SecurityType.Crypto, Market.IG);
+            var symbol = Symbol.Create("BTCUSD", SecurityType.Crypto, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CS.D.BITCOIN.CFD.IP", brokerageSymbol);
@@ -96,7 +96,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsConstructedSymbol_ForUnknownEpic()
         {
             // GetLeanSymbol best-effort parses unknown EPICs into symbols
-            var leanSymbol = _symbolMapper.GetLeanSymbol("UNKNOWN.EPIC.CODE", SecurityType.Forex, Market.IG);
+            var leanSymbol = _symbolMapper.GetLeanSymbol("UNKNOWN.EPIC.CODE", SecurityType.Forex, IGSymbolMapper.MarketName);
 
             Assert.IsNotNull(leanSymbol);
             Assert.AreEqual("EPIC", leanSymbol.Value);
@@ -106,7 +106,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsNull_ForUnknownSymbol()
         {
             // Forex constructs EPICs for unknown symbols; Index returns null
-            var symbol = Symbol.Create("UNKNOWNSYMBOL", SecurityType.Index, Market.IG);
+            var symbol = Symbol.Create("UNKNOWNSYMBOL", SecurityType.Index, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.IsNull(brokerageSymbol);
@@ -116,9 +116,9 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void RoundTrip_Forex()
         {
             // Test that converting LEAN -> EPIC -> LEAN gives us the same symbol
-            var originalSymbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var originalSymbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var epic = _symbolMapper.GetBrokerageSymbol(originalSymbol);
-            var roundTripSymbol = _symbolMapper.GetLeanSymbol(epic, SecurityType.Forex, Market.IG);
+            var roundTripSymbol = _symbolMapper.GetLeanSymbol(epic, SecurityType.Forex, IGSymbolMapper.MarketName);
 
             Assert.AreEqual(originalSymbol.Value, roundTripSymbol.Value);
             Assert.AreEqual(originalSymbol.SecurityType, roundTripSymbol.SecurityType);
@@ -129,9 +129,9 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             // Test that converting LEAN -> EPIC -> LEAN gives us the same symbol
             // Use primary symbol "SPX" (not alias "SPX500") since reverse map returns primary name
-            var originalSymbol = Symbol.Create("SPX", SecurityType.Index, Market.IG);
+            var originalSymbol = Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName);
             var epic = _symbolMapper.GetBrokerageSymbol(originalSymbol);
-            var roundTripSymbol = _symbolMapper.GetLeanSymbol(epic, SecurityType.Index, Market.IG);
+            var roundTripSymbol = _symbolMapper.GetLeanSymbol(epic, SecurityType.Index, IGSymbolMapper.MarketName);
 
             Assert.AreEqual(originalSymbol.Value, roundTripSymbol.Value);
             Assert.AreEqual(originalSymbol.SecurityType, roundTripSymbol.SecurityType);
@@ -141,7 +141,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_MinorForexPair()
         {
             // Test EUR cross (minor pair)
-            var symbol = Symbol.Create("EURGBP", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURGBP", SecurityType.Forex, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CS.D.EURGBP.MINI.IP", brokerageSymbol);
@@ -151,7 +151,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_ExoticForexPair()
         {
             // Test exotic pair
-            var symbol = Symbol.Create("USDZAR", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("USDZAR", SecurityType.Forex, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CS.D.USDZAR.MINI.IP", brokerageSymbol);
@@ -161,7 +161,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_AsianIndex()
         {
             // Test Nikkei 225
-            var symbol = Symbol.Create("N225", SecurityType.Index, Market.IG);
+            var symbol = Symbol.Create("N225", SecurityType.Index, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("IX.D.NIKKEI.DAILY.IP", brokerageSymbol);
@@ -171,7 +171,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_EuropeanIndex()
         {
             // Test DAX
-            var symbol = Symbol.Create("DAX", SecurityType.Index, Market.IG);
+            var symbol = Symbol.Create("DAX", SecurityType.Index, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("IX.D.DAX.DAILY.IP", brokerageSymbol);
@@ -181,7 +181,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_Commodity_Gold()
         {
             // Test Gold
-            var symbol = Symbol.Create("XAUUSD", SecurityType.Cfd, Market.IG);
+            var symbol = Symbol.Create("XAUUSD", SecurityType.Cfd, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CS.D.USCGC.TODAY.IP", brokerageSymbol);
@@ -191,7 +191,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_Commodity_Oil()
         {
             // Test Crude Oil
-            var symbol = Symbol.Create("CL", SecurityType.Cfd, Market.IG);
+            var symbol = Symbol.Create("CL", SecurityType.Cfd, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CC.D.CL.USS.IP", brokerageSymbol);
@@ -201,7 +201,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_Commodity_NaturalGas()
         {
             // Test Natural Gas
-            var symbol = Symbol.Create("NG", SecurityType.Cfd, Market.IG);
+            var symbol = Symbol.Create("NG", SecurityType.Cfd, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CC.D.NG.USS.IP", brokerageSymbol);
@@ -211,7 +211,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_Crypto_Ethereum()
         {
             // Test Ethereum
-            var symbol = Symbol.Create("ETHUSD", SecurityType.Crypto, Market.IG);
+            var symbol = Symbol.Create("ETHUSD", SecurityType.Crypto, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CS.D.ETHUSD.CFD.IP", brokerageSymbol);
@@ -221,7 +221,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_Crypto_Solana()
         {
             // Test Solana
-            var symbol = Symbol.Create("SOLUSD", SecurityType.Crypto, Market.IG);
+            var symbol = Symbol.Create("SOLUSD", SecurityType.Crypto, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("CS.D.SOLANA.CFD.IP", brokerageSymbol);
@@ -231,7 +231,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_Equity_Apple()
         {
             // Test Apple stock
-            var symbol = Symbol.Create("AAPL", SecurityType.Equity, Market.IG);
+            var symbol = Symbol.Create("AAPL", SecurityType.Equity, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("IX.D.APPLE.DAILY.IP", brokerageSymbol);
@@ -241,7 +241,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectBrokerageSymbol_Equity_Tesla()
         {
             // Test Tesla stock
-            var symbol = Symbol.Create("TSLA", SecurityType.Equity, Market.IG);
+            var symbol = Symbol.Create("TSLA", SecurityType.Equity, IGSymbolMapper.MarketName);
             var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
             Assert.AreEqual("IX.D.TESLA.DAILY.IP", brokerageSymbol);
@@ -251,24 +251,24 @@ namespace QuantConnect.Brokerages.IG.Tests
         public void ReturnsCorrectLeanSymbol_Commodity_Silver()
         {
             // Test Silver mapping
-            var leanSymbol = _symbolMapper.GetLeanSymbol("CS.D.USCSI.TODAY.IP", SecurityType.Cfd, Market.IG);
+            var leanSymbol = _symbolMapper.GetLeanSymbol("CS.D.USCSI.TODAY.IP", SecurityType.Cfd, IGSymbolMapper.MarketName);
 
             Assert.IsNotNull(leanSymbol);
             Assert.AreEqual("XAGUSD", leanSymbol.Value);
             Assert.AreEqual(SecurityType.Cfd, leanSymbol.SecurityType);
-            Assert.AreEqual(Market.IG, leanSymbol.ID.Market);
+            Assert.AreEqual(IGSymbolMapper.MarketName, leanSymbol.ID.Market);
         }
 
         [Test]
         public void ReturnsCorrectLeanSymbol_Equity_Microsoft()
         {
             // Test Microsoft mapping
-            var leanSymbol = _symbolMapper.GetLeanSymbol("IX.D.MICROSOFT.DAILY.IP", SecurityType.Equity, Market.IG);
+            var leanSymbol = _symbolMapper.GetLeanSymbol("IX.D.MICROSOFT.DAILY.IP", SecurityType.Equity, IGSymbolMapper.MarketName);
 
             Assert.IsNotNull(leanSymbol);
             Assert.AreEqual("MSFT", leanSymbol.Value);
             Assert.AreEqual(SecurityType.Equity, leanSymbol.SecurityType);
-            Assert.AreEqual(Market.IG, leanSymbol.ID.Market);
+            Assert.AreEqual(IGSymbolMapper.MarketName, leanSymbol.ID.Market);
         }
 
         [Test]
@@ -277,10 +277,10 @@ namespace QuantConnect.Brokerages.IG.Tests
             // Test adding a custom mapping
             _symbolMapper.AddMapping("CUSTOMFX", "CS.D.CUSTOM.MINI.IP", SecurityType.Forex);
 
-            var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(Symbol.Create("CUSTOMFX", SecurityType.Forex, Market.IG));
+            var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(Symbol.Create("CUSTOMFX", SecurityType.Forex, IGSymbolMapper.MarketName));
             Assert.AreEqual("CS.D.CUSTOM.MINI.IP", brokerageSymbol);
 
-            var leanSymbol = _symbolMapper.GetLeanSymbol("CS.D.CUSTOM.MINI.IP", SecurityType.Forex, Market.IG);
+            var leanSymbol = _symbolMapper.GetLeanSymbol("CS.D.CUSTOM.MINI.IP", SecurityType.Forex, IGSymbolMapper.MarketName);
             Assert.AreEqual("CUSTOMFX", leanSymbol.Value);
         }
 
@@ -292,7 +292,7 @@ namespace QuantConnect.Brokerages.IG.Tests
 
             foreach (var pair in testPairs)
             {
-                var symbol = Symbol.Create(pair, SecurityType.Forex, Market.IG);
+                var symbol = Symbol.Create(pair, SecurityType.Forex, IGSymbolMapper.MarketName);
                 var epic = _symbolMapper.GetBrokerageSymbol(symbol);
                 Assert.IsNotNull(epic, $"Forex pair {pair} should be mapped");
                 Assert.IsTrue(epic.Contains("MINI.IP"), $"Forex pair {pair} should use MINI contract");
@@ -307,7 +307,7 @@ namespace QuantConnect.Brokerages.IG.Tests
 
             foreach (var index in testIndices)
             {
-                var symbol = Symbol.Create(index, SecurityType.Index, Market.IG);
+                var symbol = Symbol.Create(index, SecurityType.Index, IGSymbolMapper.MarketName);
                 var epic = _symbolMapper.GetBrokerageSymbol(symbol);
                 Assert.IsNotNull(epic, $"Index {index} should be mapped");
                 Assert.IsTrue(epic.Contains("DAILY.IP"), $"Index {index} should use DAILY contract");

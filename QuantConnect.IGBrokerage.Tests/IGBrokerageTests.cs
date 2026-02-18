@@ -29,7 +29,7 @@ namespace QuantConnect.Brokerages.IG.Tests
     [TestFixture, Explicit("Requires IG Markets credentials")]
     public partial class IGBrokerageTests : BrokerageTests
     {
-        protected override Symbol Symbol => Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+        protected override Symbol Symbol => Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
         protected override SecurityType SecurityType => SecurityType.Forex;
 
         [SetUp]
@@ -91,15 +91,15 @@ namespace QuantConnect.Brokerages.IG.Tests
         /// </summary>
         private static IEnumerable<TestCaseData> OrderParameters()
         {
-            var eurusd = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var eurusd = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             yield return new TestCaseData(new MarketOrderTestParameters(eurusd));
             yield return new TestCaseData(new LimitOrderTestParameters(eurusd, 1.1500m, 1.0500m));
             yield return new TestCaseData(new StopMarketOrderTestParameters(eurusd, 1.1500m, 1.0500m));
 
-            var gbpusd = Symbol.Create("GBPUSD", SecurityType.Forex, Market.IG);
+            var gbpusd = Symbol.Create("GBPUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             yield return new TestCaseData(new StopLimitOrderTestParameters(gbpusd, 1.3500m, 1.2500m));
 
-            var spx = Symbol.Create("SPX", SecurityType.Index, Market.IG);
+            var spx = Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName);
             yield return new TestCaseData(new MarketOrderTestParameters(spx));
         }
 

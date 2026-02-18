@@ -130,7 +130,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void PlaceOrder_MarketOrder_PlacesSuccessfully()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var order = new MarketOrder(symbol, 1000, DateTime.UtcNow);
 
             var result = _brokerage.PlaceOrder(order);
@@ -146,7 +146,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void PlaceOrder_LimitOrder_PlacesSuccessfully()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var order = new LimitOrder(symbol, 1000, 1.0500m, DateTime.UtcNow);
 
             var result = _brokerage.PlaceOrder(order);
@@ -159,7 +159,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void PlaceOrder_StopMarketOrder_PlacesSuccessfully()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var order = new StopMarketOrder(symbol, 1000, 1.1500m, DateTime.UtcNow);
 
             var result = _brokerage.PlaceOrder(order);
@@ -172,7 +172,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void PlaceOrder_ShortPosition_PlacesSuccessfully()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var order = new MarketOrder(symbol, -1000, DateTime.UtcNow);
 
             var result = _brokerage.PlaceOrder(order);
@@ -192,7 +192,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void UpdateOrder_LimitPrice_UpdatesSuccessfully()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var order = new LimitOrder(symbol, 1000, 1.0500m, DateTime.UtcNow);
 
             _brokerage.PlaceOrder(order);
@@ -212,7 +212,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void UpdateOrder_NonExistentOrder_ReturnsFalse()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var order = new LimitOrder(symbol, 1000, 1.0500m, DateTime.UtcNow);
 
             var result = _brokerage.UpdateOrder(order);
@@ -226,7 +226,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void CancelOrder_PendingLimitOrder_CancelsSuccessfully()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var order = new LimitOrder(symbol, 1000, 1.0500m, DateTime.UtcNow);
 
             _brokerage.PlaceOrder(order);
@@ -239,7 +239,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         [Test]
         public void CancelOrder_NonExistentOrder_ReturnsFalse()
         {
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
             var order = new LimitOrder(symbol, 1000, 1.0500m, DateTime.UtcNow);
 
             var result = _brokerage.CancelOrder(order);

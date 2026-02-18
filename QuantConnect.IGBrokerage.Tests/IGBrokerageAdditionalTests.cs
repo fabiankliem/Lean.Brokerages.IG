@@ -103,7 +103,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             var brokerage = new IGBrokerage();
             var method = GetInstanceMethod(brokerage, "CanSubscribe");
-            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.IG);
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName);
 
             var result = (bool)method.Invoke(brokerage, new object[] { symbol });
 
@@ -115,7 +115,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             var brokerage = new IGBrokerage();
             var method = GetInstanceMethod(brokerage, "CanSubscribe");
-            var symbol = Symbol.Create("SPX", SecurityType.Index, Market.IG);
+            var symbol = Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName);
 
             var result = (bool)method.Invoke(brokerage, new object[] { symbol });
 
@@ -127,7 +127,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             var brokerage = new IGBrokerage();
             var method = GetInstanceMethod(brokerage, "CanSubscribe");
-            var symbol = Symbol.Create("BTCUSD", SecurityType.Crypto, Market.IG);
+            var symbol = Symbol.Create("BTCUSD", SecurityType.Crypto, IGSymbolMapper.MarketName);
 
             var result = (bool)method.Invoke(brokerage, new object[] { symbol });
 
@@ -139,7 +139,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             var brokerage = new IGBrokerage();
             var method = GetInstanceMethod(brokerage, "CanSubscribe");
-            var symbol = Symbol.Create("XAUUSD", SecurityType.Cfd, Market.IG);
+            var symbol = Symbol.Create("XAUUSD", SecurityType.Cfd, IGSymbolMapper.MarketName);
 
             var result = (bool)method.Invoke(brokerage, new object[] { symbol });
 
@@ -151,7 +151,7 @@ namespace QuantConnect.Brokerages.IG.Tests
         {
             var brokerage = new IGBrokerage();
             var method = GetInstanceMethod(brokerage, "CanSubscribe");
-            var symbol = Symbol.Create("AAPL", SecurityType.Equity, Market.IG);
+            var symbol = Symbol.Create("AAPL", SecurityType.Equity, IGSymbolMapper.MarketName);
 
             var result = (bool)method.Invoke(brokerage, new object[] { symbol });
 
@@ -178,11 +178,11 @@ namespace QuantConnect.Brokerages.IG.Tests
 
             var testCases = new[]
             {
-                (Symbol.Create("EURUSD", SecurityType.Forex, Market.IG), true),
-                (Symbol.Create("SPX", SecurityType.Index, Market.IG), true),
-                (Symbol.Create("BTCUSD", SecurityType.Crypto, Market.IG), true),
-                (Symbol.Create("XAUUSD", SecurityType.Cfd, Market.IG), true),
-                (Symbol.Create("AAPL", SecurityType.Equity, Market.IG), true),
+                (Symbol.Create("EURUSD", SecurityType.Forex, IGSymbolMapper.MarketName), true),
+                (Symbol.Create("SPX", SecurityType.Index, IGSymbolMapper.MarketName), true),
+                (Symbol.Create("BTCUSD", SecurityType.Crypto, IGSymbolMapper.MarketName), true),
+                (Symbol.Create("XAUUSD", SecurityType.Cfd, IGSymbolMapper.MarketName), true),
+                (Symbol.Create("AAPL", SecurityType.Equity, IGSymbolMapper.MarketName), true),
                 (Symbol.Create("ES", SecurityType.Future, Market.CME), false),
             };
 
